@@ -4,6 +4,12 @@
 
 **KukuMind** is a team of **seven AI agents written in [Jac](https://jaclang.org/)** that helps medium-scale Kenyan poultry farmers (about 500–5,000 birds) **hatch, raise, protect and sell** their birds. Farm owners and workers talk to it like WhatsApp — in **English, Kiswahili or Sheng** — or use each agent's own page with forms, charts and a camera.
 
+![Jac](https://img.shields.io/badge/Jac-99.8%25%20of%20the%20code-FC792D?style=for-the-badge) ![Files](https://img.shields.io/badge/21%20.jac%20files-7%2C300%2B%20lines-14b8a6?style=for-the-badge) ![Deployed](https://img.shields.io/badge/Deployed%20on-JacHammer-0a1628?style=for-the-badge)
+
+### 🚀 [Try the live demo on JacHammer](https://jachammer.ai/project/prj_12dfd0e721a247bfb46f15fca1f71e49?tab=preview)
+
+**Live demo:** https://jachammer.ai/project/prj_12dfd0e721a247bfb46f15fca1f71e49?tab=preview · **Built by:** Meshack Mutinda · **Event:** AI Hackathon Kenya — Hack the Future with Jac (2026)
+
 > Demo farm: **Meshack Poultry Farm** (owner Meshack, 0722 434 939) · Farm vet: **Dr. Timothy Wambua** (0714 297 727)
 
 ---
@@ -349,7 +355,7 @@ export ANTHROPIC_API_KEY=sk-ant-...  # Windows PowerShell: $env:ANTHROPIC_API_KE
 jac start main.jac
 ```
 
-Open **http://localhost:8000**. The first start builds the web page (about a minute).
+Open **http://localhost:8000** — or skip the setup and use the [live demo](https://jachammer.ai/project/prj_12dfd0e721a247bfb46f15fca1f71e49?tab=preview). The first start builds the web page (about a minute).
 
 - The farm starts **clean**: B1 1,000 broiler chicks, B2 800 broilers, B3 1,200 layers, 2,500 kg feed, no records.
 - **Manager → Dashboard → Clear all records and start fresh** resets the farm.
@@ -376,6 +382,17 @@ Run the live test: `cd livetest` then `jac run live_test.jac`.
 | `demo.jac` | Terminal demo |
 | `livetest/live_test.jac` | Live test with the real AI |
 | `jac.toml` | Project settings |
+
+### Language breakdown
+
+KukuMind is written almost entirely in Jac, including the web app (Jac client components, `.cl.jac`).
+
+| Language | Files | Size | Share of the code |
+|---|---|---|---|
+| **Jac** (`.jac`, `.cl.jac`) | 21 | 363,790 bytes (7,347 lines) | **99.8%** |
+| TOML (`jac.toml`, settings) | 1 | 855 bytes | 0.2% |
+
+There is no separate Python, JavaScript, HTML or CSS source: the server, the seven agents, the AI functions and the whole web page are Jac. (The README and the logo images are not code and are not counted.)
 
 ---
 
