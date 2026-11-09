@@ -3,13 +3,15 @@
 import from .ui { AgentHead, Tab, Field, Choice, Notice, Stat, Pill }
 import from .AgentChat { AgentChat }
 import from .AgentsPanel { agent_info }
-import from .Charts { BarChart, money }
+import from .Charts { BarChart, money, dec }
 import from .FarmPanel { Row }
+import from .Bookings { OrdersCard }
 
 sv import from ..farm { FarmView, BuyerMessages, SaleView, sell, buyer_offers, add_expense }
 
+# KSh 450, KSh 13.67 - prices shown to the cent so quantity x price = total
 def price_text(p: float) -> str {
-    return "KSh " + money(p) if p >= 1 else "KSh " + str(int(p * 100) / 100);
+    return "KSh " + dec(p, 2);
 }
 
 def:pub SalesTable(sales: list[SaleView], limit: int) -> JsxElement {
@@ -113,6 +115,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                 <div>
                     <div className="km-tabs">
                         <Tab label="Record a sale" current={tab} onPick={pick_tab} />
+                        <Tab label="Orders" current={tab} onPick={pick_tab} />
                         <Tab label="Market & buyers" current={tab} onPick={pick_tab} />
                         <Tab label="Profit & costs" current={tab} onPick={pick_tab} />
                         <Tab label="Sales history" current={tab} onPick={pick_tab} />
@@ -164,6 +167,10 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                                 <SalesTable sales={farm.sales} limit={5} />
                             </div>
                         </div>
+                    }}
+
+                    {if tab == "Orders" {
+                        <OrdersCard farm={farm} onFarm={onFarm} />
                     }}
 
                     {if tab == "Market & buyers" {
@@ -226,7 +233,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                                 <Row label="Total sales" value={"KSh " + money(farm.income)} bold={True} />
                                 <div style={{"fontWeight": "700", "fontSize": "0.85rem", "marginTop": "0.7rem", "color": "#f87171"}}>MONEY OUT</div>
                                 {for c in farm.cost_lines {
-                                    <Row key={c.kind} label={c.kind + (" (" + money(farm.feed_eaten_kg) + " kg x KSh " + str(farm.feed_price) + ")" if c.kind == "Feed eaten" else "")}
+                                    <Row key={c.kind} label={c.kind + (" (" + dec(farm.feed_eaten_kg, 2) + " kg x KSh " + dec(farm.feed_price, 2) + " per kg)" if c.kind == "Feed eaten" else "")}
                                          value={"- KSh " + money(c.amount)} />
                                 }}
                                 <Row label="Total costs" value={"- KSh " + money(total_costs)} bold={True} />
@@ -266,7 +273,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                                 <h3>Add a cost</h3>
                                 <div className="km-grid2">
                                     <Choice label="Batch" value={cost_chosen} onValue={lambda(v: str) { cost_batch = v; }}
-                                            options={[[b.batch_id, b.label] for b in farm.batches]} />
+                                            options={[[b.batch_id, b.label] for b in farm.batches] + [["all", "All batches (shared by birds alive)"]]} />
                                     <Choice label="Type of cost" value={cost_kind} onValue={lambda(v: str) { cost_kind = v; }}
                                             options={[[k, k] for k in farm.expense_kinds]} />
                                     <Field label="Amount (KSh)" value={cost_amount} onValue={lambda(v: str) { cost_amount = v; }} kind="number" hint="e.g. 4000" />

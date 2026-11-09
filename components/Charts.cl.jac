@@ -4,11 +4,12 @@ def absf(v: float) -> float { return 0.0 - v if v < 0 else v; }
 def lower(a: float, b: float) -> float { return a if a < b else b; }
 def higher(a: float, b: float) -> float { return a if a > b else b; }
 
-# 22500 -> "22,500"
+# 22500 -> "22,500" (rounded to the nearest whole number, not cut off: 1288.6 -> "1,289")
 def:pub money(x: float) -> str {
-    n = int(x);
-    neg = n < 0;
-    digits = str(0 - n if neg else n);
+    neg = x < 0;
+    n = int((0.0 - x if neg else x) + 0.5);
+    if n == 0 { neg = False; }
+    digits = str(n);
     out = "";
     while len(digits) > 3 {
         out = "," + digits[len(digits) - 3:] + out;
@@ -17,9 +18,27 @@ def:pub money(x: float) -> str {
     return ("-" if neg else "") + digits + out;
 }
 
+# 64.45 -> "64.45", 70.8 -> "70.8", 1288 -> "1,288" (up to `places` decimals, no trailing zeros)
+def:pub dec(x: float, places: int) -> str {
+    neg = x < 0;
+    scale = 1;
+    for i in range(places) { scale = scale * 10; }
+    v = int((0.0 - x if neg else x) * scale + 0.5);
+    whole = int(v / scale);
+    frac = v - whole * scale;
+    out = money(float(whole));
+    if frac > 0 {
+        fs = str(frac);
+        while len(fs) < places { fs = "0" + fs; }
+        while len(fs) > 0 and fs[len(fs) - 1] == "0" { fs = fs[:len(fs) - 1]; }
+        out = out + "." + fs;
+    }
+    return ("-" if neg and v > 0 else "") + out;
+}
+
 def fmt(v: float) -> str {
-    if v >= 10000 or v <= -10000 { return str(int(v / 100) / 10) + "k"; }
-    return str(int(v));
+    if v >= 10000 or v <= -10000 { return dec(v / 1000.0, 1) + "k"; }
+    return money(v);
 }
 
 # Vertical bar chart. signed=True draws negative values below a middle line (in red).
@@ -68,13 +87,15 @@ def:pub BarChart(title: str, labels: list[str], values: list[float], color: str 
 # Feed gauge: how many days the feed in store will last (out of 14).
 def:pub FeedGauge(days: float, kg: float) -> JsxElement {
     pct: float = lower(100.0, higher(3.0, days / 14.0 * 100.0));
-    colour = "#f87171" if days < 3 else ("#fbbf24" if days < 7 else "#4ade80");
-    note = "Order feed now!" if days < 3 else ("Plan a feed order this week" if days < 7 else "Feed stock is fine");
+    no_birds = days <= 0 and kg > 0;     # feed in store but no birds eating it yet
+    colour = "#2dd4bf" if no_birds else ("#f87171" if days < 3 else ("#fbbf24" if days < 7 else "#4ade80"));
+    note = "No birds to feed yet" if no_birds else ("Order feed now!" if days < 3 else ("Plan a feed order this week" if days < 7 else "Feed stock is fine"));
+    if no_birds { pct = 100.0; }
     return
         <div style={{"background": "#10213a", "border": "1px solid #22385c", "borderRadius": "12px", "padding": "0.55rem 0.6rem", "marginBottom": "0.6rem"}}>
             <div style={{"display": "flex", "justifyContent": "space-between", "fontSize": "0.8rem"}}>
                 <strong style={{"color": "#e6edf7"}}>Feed stock</strong>
-                <span style={{"color": colour, "fontWeight": "700"}}>{str(days) + " days"}</span>
+                <span style={{"color": colour, "fontWeight": "700"}}>{"-" if no_birds else str(days) + " days"}</span>
             </div>
             <div style={{"height": "12px", "background": "#1c3152", "borderRadius": "999px", "margin": "0.4rem 0", "overflow": "hidden"}}>
                 <div style={{"width": str(pct) + "%", "height": "100%", "background": colour, "borderRadius": "999px"}}></div>

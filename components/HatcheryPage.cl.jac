@@ -146,7 +146,7 @@ def:pub HatcheryPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: 
                             <div className="km-grid3" style={{"marginBottom": "1rem"}}>
                                 <Stat label="Sets hatched" value={str(len(finished))} />
                                 <Stat label="Chicks hatched" value={str(total_hatched)} />
-                                <Stat label="Hatch rate" value={(str(int(total_hatched * 100 / total_set)) if total_set > 0 else "-") + "%"} note="good is 80% or more" />
+                                <Stat label="Hatch rate" value={(str(int(total_hatched * 100.0 / total_set + 0.5)) if total_set > 0 else "-") + "%"} note="chicks / eggs set · good is 80% or more" />
                             </div>
                             <div className="km-card">
                                 <table className="km-table">

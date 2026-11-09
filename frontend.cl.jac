@@ -10,6 +10,7 @@ import from .components.HatcheryPage { HatcheryPage }
 import from .components.AdvisorPage { AdvisorPage }
 import from .components.FeedPage { FeedPage }
 import from .components.SalesPage { SalesPage }
+import from .components.ResetFarm { ResetFarm }
 
 sv import from farm {
     ChatReply, FarmView, chat, agent_chat, farm_status
@@ -31,7 +32,8 @@ def:pub app -> JsxElement {
     has farm: FarmView | None = None;
     has chats: dict[str, list[dict]] = {};
     has busy_agent: str = "";
-    has lang: str = "English";      # language for every reply (Auto = same as the message)
+    has lang: str = "English";
+    has resetting: bool = False;     # the Reset farm window is open      # language for every reply (Auto = same as the message)
 
     async can with entry {
         document.title = "KukuMind - your AI farm team";
@@ -92,6 +94,12 @@ def:pub app -> JsxElement {
         win.scrollTo(0, 0);
     }
     def go_home(e: MouseEvent) { open_page("home"); }
+    def after_reset(f: FarmView) {
+        farm = f;
+        chats = {};
+        resetting = False;
+        open_page("home");
+    }
 
     red = len([b for b in (farm as FarmView).batches if b.health == "RED"]) if farm is not None else 0;
 
@@ -109,6 +117,7 @@ def:pub app -> JsxElement {
                 {if farm is not None {
                     <span className="km-chip">{"🏡 " + (farm as FarmView).name}</span>
                 }}
+                <button className="km-reset" onClick={lambda(e: MouseEvent) { resetting = True; }} title="Start again: demo farm or your own empty farm">⟳ Reset farm</button>
                 <label className="km-lang" title="Language KukuMind replies in">
                     🌐
                     <select value={lang} onChange={lambda(e: ChangeEvent) { lang = str(e.target.value); }}>
@@ -147,6 +156,9 @@ def:pub app -> JsxElement {
                 </main>
             </div>
 
+            {if resetting {
+                <ResetFarm onDone={after_reset} onClose={lambda { resetting = False; }} />
+            }}
             <footer className="km-footer">
                 KukuMind never prescribes medicine. For RED alerts, call a vet or the county veterinary officer. · Built with <b>Jac</b> + Claude
             </footer>

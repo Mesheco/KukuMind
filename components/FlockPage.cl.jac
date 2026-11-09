@@ -4,7 +4,7 @@ import from .ui { AgentHead, Tab, Field, Choice, Notice, Stat, Pill }
 import from .AgentChat { AgentChat }
 import from .AgentsPanel { agent_info }
 import from .FarmPanel { BirdCount }
-import from .Charts { BarChart, money }
+import from .Charts { BarChart, money, dec }
 import from .RecordsTable { RecordsTable }
 
 sv import from ..farm { FarmView, BatchView, submit_report, register_flock }
@@ -123,7 +123,7 @@ def:pub FlockPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: lis
                             </div>
                             {if num_or0(count) > 0 and num_or0(chick_price) > 0 {
                                 <div className="km-muted" style={{"marginTop": "0.5rem"}}>
-                                    {"Chick cost: " + str(int(num_or0(count))) + " x KSh " + str(int(num_or0(chick_price))) + " = KSh " + money(num_or0(count) * num_or0(chick_price)) + " (saved as a cost of the new batch)"}
+                                    {"Chick cost: " + money(num_or0(count)) + " x KSh " + dec(num_or0(chick_price), 2) + " = KSh " + money(num_or0(count) * num_or0(chick_price)) + " (saved as a cost of the new batch)"}
                                 </div>
                             }}
                             <div style={{"marginTop": "0.8rem"}}>
@@ -140,7 +140,7 @@ def:pub FlockPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: lis
                                 <BirdCount start={farm.start_total} dead={farm.dead_total} sold={farm.sold_total} alive={farm.birds_alive} ok={farm.count_ok} />
                                 <div style={{"overflowX": "auto"}}>
                                     <table className="km-table">
-                                        <thead><tr><th>Batch</th><th>House</th><th>Started</th><th>Dead</th><th>Sold</th><th>Alive</th><th>Deaths %</th><th>Eggs</th></tr></thead>
+                                        <thead><tr><th>Batch</th><th>House</th><th>Started</th><th>Dead</th><th>Sold</th><th>Alive</th><th>Deaths %</th><th>Eggs</th><th>Laying / weight</th></tr></thead>
                                         <tbody>
                                             {for b in farm.batches {
                                                 <tr key={b.batch_id}>
@@ -148,6 +148,7 @@ def:pub FlockPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: lis
                                                     <td style={{"color": "#f87171"}}>{str(b.dead)}</td><td style={{"color": "#fbbf24"}}>{str(b.sold)}</td>
                                                     <td style={{"color": "#4ade80", "fontWeight": "700"}}>{money(float(b.alive))}</td>
                                                     <td>{str(b.mortality) + "%"}</td><td>{money(float(b.eggs_collected)) if b.eggs_collected > 0 else "-"}</td>
+                                                    <td>{(str(b.lay_rate) + "% laying") if b.lay_rate >= 0 else ((str(b.avg_weight) + " kg" + (" · FCR " + str(b.fcr) if b.fcr > 0 else "")) if b.avg_weight > 0 else "-")}</td>
                                                 </tr>
                                             }}
                                         </tbody>

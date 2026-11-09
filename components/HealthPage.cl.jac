@@ -5,6 +5,7 @@ import from .AgentChat { AgentChat }
 import from .AgentsPanel { agent_info }
 import from .Camera { Camera }
 import from .Charts { BarChart }
+import from .Bookings { VetVisitsCard }
 
 sv import from ..farm { FarmView, Diagnosis, DiseaseInfo, diagnose, research, clear_batch }
 
@@ -106,6 +107,7 @@ def:pub HealthPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None]
                         <Tab label="Diagnose" current={tab} onPick={pick_tab} />
                         <Tab label="Monitor" current={tab} onPick={pick_tab} />
                         <Tab label="Research" current={tab} onPick={pick_tab} />
+                        <Tab label="Vet visits" current={tab} onPick={pick_tab} />
                     </div>
 
                     {if tab == "Diagnose" {
@@ -178,6 +180,10 @@ def:pub HealthPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None]
                                 </div>
                             }}
                         </div>
+                    }}
+
+                    {if tab == "Vet visits" {
+                        <VetVisitsCard farm={farm} onFarm={onFarm} />
                     }}
 
                     {if tab == "Monitor" {

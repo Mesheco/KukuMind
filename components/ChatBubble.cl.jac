@@ -8,6 +8,7 @@ glob AGENT_NAMES = {
     "feed": "Feed & inventory agent",
     "sales": "Sales & marketing agent",
     "briefing": "Manager - morning briefing",
+    "question": "Manager - from all the farm records",
     "system": "KukuMind"
 };
 

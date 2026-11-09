@@ -5,6 +5,10 @@ description = "KukuMind - your AI farm team, from egg to market. Seven Jac agent
 entry-point = "main.jac"
 kind = "fullstack"
 
+# Python packages the server needs (installed by `jac install` / JacHammer)
+[dependencies]
+byllm = ">=0.6.0"
+
 [dependencies.npm]
 react = "^18.2.0"
 react-dom = "^18.2.0"

@@ -105,6 +105,11 @@ html, body { margin: 0; background: var(--navy-800); color: var(--text); }
 .km-progress > div { height: 100%; background: linear-gradient(90deg, var(--teal), var(--gold)); border-radius: 999px; }
 .km-video { width: 100%; max-height: 300px; background: #000; border-radius: 12px; object-fit: cover; }
 .km-photo { width: 100%; max-height: 300px; object-fit: contain; border-radius: 12px; background: var(--navy-800); }
+.km-modal-back { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(4,10,20,0.72); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 5vh 16px; overflow-y: auto; }
+.km-modal { max-width: 680px; width: 100%; margin: 0; box-shadow: 0 30px 80px rgba(0,0,0,0.5); }
+.km-picked { border-color: var(--teal-2); box-shadow: 0 0 0 2px rgba(45,212,191,0.35); background: var(--teal-soft); }
+.km-reset { font: inherit; font-size: 0.8rem; font-weight: 600; border: 1px solid var(--line-2); background: var(--navy-600); color: var(--text); border-radius: 999px; padding: 0.35rem 0.75rem; cursor: pointer; white-space: nowrap; }
+.km-reset:hover { border-color: var(--teal-2); color: var(--teal-2); }
 .km-footer { text-align: center; font-size: 0.75rem; color: var(--subtle); padding: 0 1rem 1.4rem; }
 .km-footer b { color: var(--gold); font-weight: 600; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -121,7 +126,8 @@ html, body { margin: 0; background: var(--navy-800); color: var(--text); }
   .km-lang select { max-width: 92px; font-size: 0.78rem; }
   .km-brand { min-width: 0; }
   .km-brand > div { min-width: 0; }
-  .km-tag { font-size: 0.72rem; }
+  .km-tag { display: none; }
+  .km-reset { padding: 0.3rem 0.55rem; font-size: 0.75rem; }
   .km-brand img { height: 38px; }
   .km-work { gap: 0.6rem; }
   .km-side { width: 100%; position: static; }

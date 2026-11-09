@@ -1,8 +1,8 @@
-jac-env/
-.jac/
-node_modules/
-__pycache__/
-.vscode/
-.idea/
+# private data - never upload
+customers.json
+whatsapp_usage.json
+marketing_drafts.txt
+marketing_drafts.json
+chats/
 .env
-check.py
+__pycache__/

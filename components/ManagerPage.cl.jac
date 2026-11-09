@@ -5,6 +5,7 @@ import from .AgentChat { AgentChat }
 import from .AgentsPanel { agent_info, all_agents }
 import from .FarmPanel { FarmPanel }
 import from .RecordsTable { RecordsTable }
+import from .Bookings { BookingsBoard }
 
 sv import from ..farm { FarmView, briefing, next_day, clear_batch, start_fresh }
 
@@ -54,6 +55,7 @@ def:pub ManagerPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None
                     <div className="km-tabs">
                         <Tab label="Morning briefing" current={tab} onPick={pick_tab} />
                         <Tab label="Today's plan" current={tab} onPick={pick_tab} />
+                        <Tab label="Orders & bookings" current={tab} onPick={pick_tab} />
                         <Tab label="Dashboard" current={tab} onPick={pick_tab} />
                         <Tab label="Records" current={tab} onPick={pick_tab} />
                     </div>
@@ -110,6 +112,10 @@ def:pub ManagerPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None
                                 </div>
                             </div>
                         </div>
+                    }}
+
+                    {if tab == "Orders & bookings" {
+                        <BookingsBoard farm={farm} onFarm={onFarm} />
                     }}
 
                     {if tab == "Dashboard" {

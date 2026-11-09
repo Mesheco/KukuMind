@@ -3,7 +3,8 @@
 import from .ui { AgentHead, Tab, Field, Notice, Stat }
 import from .AgentChat { AgentChat }
 import from .AgentsPanel { agent_info }
-import from .Charts { FeedGauge, BarChart, money }
+import from .Charts { FeedGauge, BarChart, money, dec }
+import from .Bookings { SuppliesCard }
 
 sv import from ..farm { FarmView, add_feed }
 
@@ -20,8 +21,7 @@ def:pub FeedPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: list
     has saving: bool = False;
 
     a = agent_info("feed");
-    week_need = farm.feed_need_per_day * 7.0;
-    order_bags = int((week_need - farm.feed_kg) / 50.0 + 0.99) if week_need > farm.feed_kg else 0;
+    order_bags = farm.bags_to_order;      # worked out on the server: 7 days of need - store - feed already ordered
     feed_alerts = [x for x in farm.alerts if "feed" in x.lower() or "eating" in x.lower() or "using" in x.lower()];
 
     async def save() {
@@ -46,15 +46,16 @@ def:pub FeedPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: list
                         <Tab label="Feed store" current={tab} onPick={pick_tab} />
                         <Tab label="Per batch" current={tab} onPick={pick_tab} />
                         <Tab label="Deliveries" current={tab} onPick={pick_tab} />
+                        <Tab label="Supply orders" current={tab} onPick={pick_tab} />
                     </div>
 
                     {if tab == "Feed store" {
                         <div>
                             <div className="km-grid4" style={{"marginBottom": "0.8rem"}}>
-                                <Stat label="In store" value={money(farm.feed_kg) + " kg"} note={str(int(farm.feed_kg / 50.0)) + " bags"} />
+                                <Stat label="In store" value={money(farm.feed_kg) + " kg"} note={dec(farm.feed_kg / 50.0, 1) + " bags of 50 kg"} />
                                 <Stat label="Needed per day" value={money(farm.feed_need_per_day) + " kg"} note="whole farm" />
                                 <Stat label="Lasts" value={str(farm.feed_days) + " days"} colour={"#f87171" if farm.feed_days < 3 else ("#fbbf24" if farm.feed_days < 7 else "#4ade80")} />
-                                <Stat label="Order for 1 week" value={str(order_bags) + " bags"} note="of 50 kg" />
+                                <Stat label="Order for 1 week" value={str(order_bags) + " bags"} note={"of 50 kg" + (" · " + money(farm.feed_on_order_kg) + " kg already ordered" if farm.feed_on_order_kg > 0 else "")} />
                             </div>
                             <FeedGauge days={farm.feed_days} kg={farm.feed_kg} />
                             {if len(feed_alerts) > 0 {
@@ -78,6 +79,10 @@ def:pub FeedPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: list
                         </div>
                     }}
 
+                    {if tab == "Supply orders" {
+                        <SuppliesCard farm={farm} onFarm={onFarm} />
+                    }}
+
                     {if tab == "Per batch" {
                         <div>
                             <div className="km-card">
@@ -91,7 +96,7 @@ def:pub FeedPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: list
                                                 <td>{str(r.need_kg) + " kg"}</td>
                                                 <td>{str(r.last_used) + " kg" if r.last_used >= 0 else "-"}</td>
                                                 <td style={{"color": FEED_STATUS.get(r.status, "#c8d4e6"), "fontWeight": "700"}}>{r.status}</td>
-                                                <td>{money(r.eaten_kg) + " kg"}</td>
+                                                <td>{dec(r.eaten_kg, 1) + " kg"}</td>
                                             </tr>
                                         }}
                                     </tbody>
@@ -116,15 +121,15 @@ def:pub FeedPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: list
                                 <thead><tr><th>Date</th><th>Feed</th><th>Cost</th><th>Price per kg</th></tr></thead>
                                 <tbody>
                                     {for (i, d) in enumerate(farm.deliveries) {
-                                        <tr key={str(i)}><td>{d.date}</td><td>{money(d.kg) + " kg"}</td>
+                                        <tr key={str(i)}><td>{d.date}</td><td>{dec(d.kg, 1) + " kg"}</td>
                                             <td>{"KSh " + money(d.cost) if d.cost > 0 else "-"}</td>
-                                            <td>{"KSh " + str(int(d.cost / d.kg)) if d.cost > 0 and d.kg > 0 else "-"}</td></tr>
+                                            <td>{"KSh " + dec(d.cost / d.kg, 2) if d.cost > 0 and d.kg > 0 else "-"}</td></tr>
                                     }}
                                 </tbody>
                             </table>
                             {if len(farm.deliveries) == 0 { <div className="km-small" style={{"padding": "0.5rem"}}>No deliveries recorded yet. The farm started with 2,500 kg in store.</div> }}
                             <div className="km-muted" style={{"marginTop": "0.6rem"}}>
-                                {"Feed price used for profit: KSh " + str(farm.feed_price) + " per kg" + (" (average of deliveries)" if len(farm.deliveries) > 0 else " (default until a delivery with a price is added)")}
+                                {"Feed price used for profit: KSh " + dec(farm.feed_price, 2) + " per kg" + (" (average of deliveries)" if len(farm.deliveries) > 0 else " (default until a delivery with a price is added)")}
                             </div>
                         </div>
                     }}

@@ -2,16 +2,16 @@
 
 glob AGENTS: list[dict] = [
     {"key": "manager", "icon": "🧭", "name": "Manager", "short": "Team chat & briefing",
-     "job": "The front door. Reads every message, passes it to the right agent, and writes the morning briefing.",
-     "does": ["Routes any message in English, Kiswahili or Sheng", "Morning briefing for the owner", "Today's plan and farm-wide alerts"],
-     "examples": ["Habari ya shamba leo?", "B1 leo vifo mbili, chakula gunia moja", "Sold 50 B3 layers at 450 each to Mama Njeri"]},
+     "job": "The front door. Takes every message, order and booking, passes it to the right agent (which records it), and writes the morning briefing.",
+     "does": ["Routes any message in English, Kiswahili or Sheng", "Answers any question from all the agents' saved records", "Customer orders, supply orders, vet visits and costs", "Morning briefing, today's plan and farm-wide alerts"],
+     "examples": ["Habari ya shamba leo?", "How many birds died this week?", "Tumepata faida ngapi mwezi huu?", "Mama Njeri ameagiza broilers 100 za Ijumaa kwa 600", "Nimeagiza gunia 40 za chakula, zitafika Jumatatu", "Nimelipa vibarua 5000"]},
     {"key": "report", "icon": "📒", "name": "Flock records", "short": "Reports & new flocks",
      "job": "Saves daily reports (deaths, feed, eggs, weight), registers new flocks and keeps every bird counted.",
      "does": ["Daily report form or one-line message", "Register bought chicks as a new batch", "Start − dead − sold = alive for every batch"],
      "examples": ["B1 leo vifo mbili, chakula gunia moja", "Tumeleta vifaranga 500 wa broiler leo, House B", "B3 mayai trei 35, kuku moja imekufa"]},
     {"key": "health", "icon": "🩺", "name": "Disease detector", "short": "Diagnose · monitor · research",
      "job": "Checks sick birds from the camera or symptoms, watches the records for early warnings, and explains diseases.",
-     "does": ["Camera / photo check with RED · AMBER · GREEN", "Monitors deaths, feed and egg drops", "Disease library and a ready message for the vet"],
+     "does": ["Camera / photo check with RED · AMBER · GREEN", "Monitors deaths, feed and egg drops", "Disease library, vet visits and a ready message for the vet"],
      "examples": ["Kuku za B2 zinakohoa na zingine zimepinda shingo", "Chicks in B1 have white watery droppings", "What is Newcastle disease?"]},
     {"key": "hatchery", "icon": "🥚", "name": "Hatchery", "short": "Incubator to chicks",
      "job": "Runs the incubator: eggs set, candling on day 7 and 14, lockdown day 18, hatch day 21.",
@@ -23,12 +23,12 @@ glob AGENTS: list[dict] = [
      "examples": ["When is the Gumboro vaccine for B1?", "Vifaranga wa B1 wanahitaji joto kiasi gani?", "How much space do layers need?"]},
     {"key": "feed", "icon": "🌾", "name": "Feed & inventory", "short": "Stock, use & orders",
      "job": "Tracks the feed store, how much each batch should eat, wastage, and when to order.",
-     "does": ["Days of feed left and order alerts", "Feed per batch: expected vs used", "Feed deliveries and price per kg"],
-     "examples": ["Msosi itatosha siku ngapi?", "Is B2 eating too much?", "How many bags should I order this week?"]},
+     "does": ["Days of feed left and order alerts", "Feed per batch: expected vs used", "Supply orders: feed, chicks, vaccines - received in one tap"],
+     "examples": ["Msosi itatosha siku ngapi?", "Nimeagiza gunia 40 za chakula kwa 140,000", "P1 imefika"]},
     {"key": "sales", "icon": "💰", "name": "Sales & marketing", "short": "Sales, buyers & profit",
      "job": "Records sales, finds what is ready for market, writes messages to buyers, and shows profit per batch.",
-     "does": ["Record bird and egg sales", "WhatsApp offers to buyers", "Profit per batch (sales − feed)"],
-     "examples": ["Sold 50 B3 layers at 450 each to Mama Njeri", "Tumeuza mayai trei 20 kwa 420", "Is B2 making money?"]}
+     "does": ["Record sales and customer orders", "WhatsApp offers to buyers", "Profit per batch (sales − feed − costs)"],
+     "examples": ["Sold 50 B3 layers at 450 each to Mama Njeri", "Hotel X wants 20 trays of eggs on Saturday", "Is B2 making money?"]}
 ];
 
 # Globals are not shared between client files, so other pages ask for the list

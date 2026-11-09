@@ -1,6 +1,6 @@
 """The farm at a glance: key numbers, charts, batches with health colour, incubator and alerts."""
 
-import from .Charts { BarChart, FeedGauge, money }
+import from .Charts { BarChart, FeedGauge, money, dec }
 
 sv import from ..farm { FarmView, BatchView }
 
@@ -99,7 +99,7 @@ def:pub FarmPanel(
             <div style={{"background": "#10213a", "border": "1px solid #22385c", "borderRadius": "12px", "padding": "0.55rem 0.6rem", "marginBottom": "0.6rem", "fontSize": "0.75rem", "color": "#e6edf7"}}>
                 <strong style={{"fontSize": "0.8rem"}}>Money and feed so far</strong>
                 <Row label="Sales (birds + eggs)" value={"KSh " + money(fv.income)} />
-                <Row label={"Feed eaten: " + money(fv.feed_eaten_kg) + " kg x KSh " + str(fv.feed_price)} value={"- KSh " + money(fv.feed_eaten_cost)} />
+                <Row label={"Feed eaten: " + dec(fv.feed_eaten_kg, 2) + " kg x KSh " + dec(fv.feed_price, 2) + " per kg"} value={"- KSh " + money(fv.feed_eaten_cost)} />
                 <Row label="Other costs (chicks, vaccines, labour...)" value={"- KSh " + money(fv.other_costs)} />
                 <Row label="Profit" value={"KSh " + money(fv.balance)} bold={True} colour={"#4ade80" if fv.balance >= 0 else "#f87171"} />
                 <Row label="Eggs collected / sold" value={money(float(fv.eggs_collected)) + " / " + money(float(fv.eggs_sold))} />
