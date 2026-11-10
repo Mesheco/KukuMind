@@ -3,7 +3,7 @@
 import from .ui { AgentHead, Tab, Field, Choice, Notice, Stat, Pill }
 import from .AgentChat { AgentChat }
 import from .AgentsPanel { agent_info }
-import from .Charts { BarChart, money, dec }
+import from .Charts { BarChart, HBars, money, dec }
 import from .FarmPanel { Row }
 import from .Bookings { OrdersCard }
 
@@ -37,7 +37,7 @@ def:pub SalesTable(sales: list[SaleView], limit: int) -> JsxElement {
 
 def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None], lines: list[dict], busy: bool,
                   onSend: Callable[[str, str, str], None]) -> JsxElement {
-    has tab: str = "Record a sale";
+    has tab: str = "Sales report";
     has batch_id: str = "";
     has item: str = "birds";
     has qty: str = "";
@@ -58,6 +58,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
     has cost_ok: bool = True;
 
     a = agent_info("sales");
+    ss = farm.sales_summary;
     chosen = batch_id if batch_id != "" else (farm.batches[0].batch_id if len(farm.batches) > 0 else "");
     cost_chosen = cost_batch if cost_batch != "" else chosen;
     picked = [b for b in farm.batches if b.batch_id == chosen];
@@ -114,12 +115,49 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
             <div className="km-work">
                 <div>
                     <div className="km-tabs">
+                        <Tab label="Sales report" current={tab} onPick={pick_tab} />
                         <Tab label="Record a sale" current={tab} onPick={pick_tab} />
                         <Tab label="Orders" current={tab} onPick={pick_tab} />
                         <Tab label="Market & buyers" current={tab} onPick={pick_tab} />
                         <Tab label="Profit & costs" current={tab} onPick={pick_tab} />
                         <Tab label="Sales history" current={tab} onPick={pick_tab} />
                     </div>
+
+                    {if tab == "Sales report" {
+                        <div>
+                            <div className="km-grid4" style={{"marginBottom": "0.8rem"}}>
+                                <Stat label="Total sales" value={"KSh " + money(ss.total)} note={str(ss.n_sales) + (" sale" if ss.n_sales == 1 else " sales") + " so far"} />
+                                <Stat label="This month" value={"KSh " + money(ss.month)}
+                                      note={"last month KSh " + money(ss.last_month)}
+                                      colour={"#4ade80" if ss.month >= ss.last_month and ss.month > 0 else "#ffffff"} />
+                                <Stat label="Last 7 days" value={"KSh " + money(ss.week)} note={"today KSh " + money(ss.today)} />
+                                <Stat label="Profit (all time)" value={"KSh " + money(farm.balance)} note="sales − feed − other costs"
+                                      colour={"#4ade80" if farm.balance >= 0 else "#f87171"} />
+                            </div>
+                            <div className="km-grid4" style={{"marginBottom": "0.8rem"}}>
+                                <Stat label="Birds sold" value={money(float(ss.birds_sold))}
+                                      note={("average KSh " + money(ss.avg_bird_price) + " a bird") if ss.birds_sold > 0 else "none yet"} />
+                                <Stat label="Eggs sold" value={money(float(ss.eggs_sold // 30)) + " trays" + (" + " + str(ss.eggs_sold % 30) if ss.eggs_sold % 30 > 0 else "")}
+                                      note={("average KSh " + money(ss.avg_tray_price) + " a tray") if ss.eggs_sold > 0 else "none yet"} />
+                                <Stat label="Eggs in store" value={money(float(farm.eggs_in_store))} note="collected − sold" />
+                                <Stat label="Open orders" value={str(ss.open_orders)} note={"worth KSh " + money(ss.open_orders_value)} colour="#f2b84b" />
+                            </div>
+                            <div style={{"display": "grid", "gridTemplateColumns": "repeat(auto-fit, minmax(min(280px, 100%), 1fr))", "gap": "0 0.8rem"}}>
+                                <BarChart title="Sales per day - last 14 days (KSh, by day of the month)" labels={ss.day_labels} values={ss.day_values}
+                                          empty_note="No sales yet." />
+                                <BarChart title="Sales per month - last 6 months (KSh)" labels={ss.month_labels} values={ss.month_values}
+                                          color="#f2b84b" empty_note="No sales yet." />
+                                <HBars title="Where the money comes from" labels={["Birds", "Eggs"]} values={[ss.bird_income, ss.egg_income]}
+                                       empty_note="No sales yet - record one in 'Record a sale'." />
+                                <HBars title="Top buyers" labels={ss.buyer_names} values={ss.buyer_values} color="#f2b84b"
+                                       empty_note="No buyers have bought yet." />
+                                <BarChart title="Sales per batch (KSh)" labels={ss.batch_labels} values={ss.batch_values} empty_note="No batches yet." />
+                                <BarChart title="Profit per batch (KSh)" labels={[b.batch_id for b in farm.batches]}
+                                          values={[b.balance for b in farm.batches]} color="#4ade80" signed={True} />
+                            </div>
+                            <div className="km-small">All numbers are worked out by KukuMind from the saved sales, reports and costs. See "Profit & costs" for the full statement and "Sales history" for every sale.</div>
+                        </div>
+                    }}
 
                     {if tab == "Record a sale" {
                         <div>

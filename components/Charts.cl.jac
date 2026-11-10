@@ -103,3 +103,32 @@ def:pub FeedGauge(days: float, kg: float) -> JsxElement {
             <div style={{"fontSize": "0.72rem", "color": "#94a8c4"}}>{money(kg) + " kg in store · " + note}</div>
         </div>;
 }
+
+# Horizontal bars with the value and share of the total: good for "who bought the most" or "birds vs eggs".
+def:pub HBars(title: str, labels: list[str], values: list[float], color: str = "#2dd4bf",
+              empty_note: str = "No data yet", unit: str = "KSh ") -> JsxElement {
+    biggest: float = 1.0;
+    total: float = 0.0;
+    for v in values {
+        total = total + v;
+        if v > biggest { biggest = v; }
+    }
+    return
+        <div style={{"background": "#10213a", "border": "1px solid #22385c", "borderRadius": "12px", "padding": "0.6rem 0.7rem", "marginBottom": "0.6rem"}}>
+            <div style={{"fontSize": "0.8rem", "fontWeight": "700", "color": "#e6edf7", "marginBottom": "0.4rem"}}>{title}</div>
+            {if len(values) == 0 or total <= 0 {
+                <div style={{"fontSize": "0.75rem", "color": "#6f84a3", "padding": "0.6rem 0"}}>{empty_note}</div>
+            }}
+            {for (i, v) in enumerate(values) {
+                <div key={str(i)} style={{"marginBottom": "0.45rem"}}>
+                    <div style={{"display": "flex", "justifyContent": "space-between", "fontSize": "0.78rem", "color": "#c8d4e6", "gap": "0.5rem"}}>
+                        <span style={{"overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"}}>{labels[i] if i < len(labels) else ""}</span>
+                        <span style={{"whiteSpace": "nowrap", "fontWeight": "700"}}>{unit + money(v) + (" · " + str(int(v * 100.0 / total + 0.5)) + "%" if total > 0 else "")}</span>
+                    </div>
+                    <div style={{"height": "9px", "background": "#1c3152", "borderRadius": "999px", "marginTop": "0.2rem", "overflow": "hidden"}}>
+                        <div style={{"width": str(higher(2.0, v * 100.0 / biggest)) + "%", "height": "100%", "background": color, "borderRadius": "999px"}}></div>
+                    </div>
+                </div>
+            }}
+        </div>;
+}

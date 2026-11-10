@@ -2027,6 +2027,34 @@ obj BatchView {
     has fcr: float = 0.0;              # feed conversion: kg feed per kg of bird (0 = no weight yet)
 }
 
+# Sales report numbers (all worked out on the server)
+obj SalesSummary {
+    has total: float = 0.0;
+    has today: float = 0.0;
+    has week: float = 0.0;            # last 7 days
+    has month: float = 0.0;           # this calendar month
+    has last_month: float = 0.0;
+    has n_sales: int = 0;
+    has birds_sold: int = 0;
+    has bird_income: float = 0.0;
+    has avg_bird_price: float = 0.0;  # KSh per bird
+    has eggs_sold: int = 0;
+    has egg_income: float = 0.0;
+    has avg_tray_price: float = 0.0;  # KSh per tray of 30
+    has bird_pct: float = 0.0;        # share of sales from birds (%)
+    has egg_pct: float = 0.0;
+    has day_labels: list[str] = [];   # last 14 days
+    has day_values: list[float] = [];
+    has month_labels: list[str] = []; # last 6 months
+    has month_values: list[float] = [];
+    has buyer_names: list[str] = [];  # top buyers, biggest first
+    has buyer_values: list[float] = [];
+    has batch_labels: list[str] = [];
+    has batch_values: list[float] = [];
+    has open_orders_value: float = 0.0;
+    has open_orders: int = 0;
+}
+
 obj FarmView {
     has name: str;
     has owner: str;
@@ -2082,6 +2110,7 @@ obj FarmView {
     has supply_kinds: list[str] = [];
     has eggs_in_store: int = 0;
     has today: str = "";
+    has sales_summary: SalesSummary = SalesSummary();
 }
 
 obj OrderView {
@@ -2364,7 +2393,7 @@ def farm_view(f: Farm) -> FarmView {
                     booking_tasks=booking_tasks(f),
                     orders=order_views(f), supplies=supply_views(f), vet_visits=visit_views(f),
                     supply_kinds=SUPPLY_KINDS, eggs_in_store=sum([max(0, eggs_in_store(b)) for b in farm_batches(f)]),
-                    today=today(),
+                    today=today(), sales_summary=sales_summary(f),
                     health_rows=[health_row(b) for b in farm_batches(f)],
                     vet_name=farm_vet(f).name, vet_phone=farm_vet(f).phone,
                     egg_set_views=[egg_set_view(e) for e in [f -->[?:EggSet]]],
@@ -4101,3 +4130,63 @@ say it is not in the records yet (and which page or message would record it) ins
 Name the batch, period and dates you are using. Plain text, no markdown, short.
 Reply in the language given and follow HOW TO WRITE EVERY REPLY in the language guide."""
 def manager_answer(question: str, facts: str, language: str, language_guide: str) -> str by writer();
+
+
+# ---------- SALES REPORT: totals, averages and chart data, worked out by code ----------
+def sales_summary(f: Farm) -> SalesSummary {
+    t = today();
+    td = date.fromisoformat(t);
+    w0 = (td - timedelta(days=6)).isoformat();
+    m0 = t[:8] + "01";
+    lm_end = (date.fromisoformat(m0) - timedelta(days=1)).isoformat();
+    lm0 = lm_end[:8] + "01";
+    sales = [x for b in farm_batches(f) for x in [b -->[?:Sale]]];
+    total = r0(sum([x.total for x in sales]));
+    birds = [x for x in sales if x.item != "eggs"];
+    eggs = [x for x in sales if x.item == "eggs"];
+    bird_income = r0(sum([x.total for x in birds]));
+    egg_income = r0(sum([x.total for x in eggs]));
+    birds_sold = sum([x.qty for x in birds]);
+    eggs_sold = sum([x.qty for x in eggs]);
+    day_labels: list[str] = [];
+    day_values: list[float] = [];
+    for i in range(13, -1, -1) {
+        d = (td - timedelta(days=i)).isoformat();
+        day_labels.append(d[8:]);
+        day_values.append(r0(sum([x.total for x in sales if x.date == d])));
+    }
+    month_labels: list[str] = [];
+    month_values: list[float] = [];
+    y = td.year;
+    m = td.month;
+    months: list[str] = [];
+    for i in range(6) {
+        months.insert(0, f"{y:04d}-{m:02d}");
+        m = m - 1;
+        if m == 0 { m = 12; y = y - 1; }
+    }
+    for ym in months {
+        month_labels.append(date.fromisoformat(ym + "-01").strftime("%b"));
+        month_values.append(r0(sum([x.total for x in sales if x.date[:7] == ym])));
+    }
+    bv = sorted([(r0(sum([x.total for x in sales if x.buyer == b.name])), b.name) for b in [f -->[?:Buyer]]], reverse=True);
+    bv = [z for z in bv if z[0] > 0][:6];
+    open_o = [o for o in farm_orders(f) if o.status == "booked"];
+    return SalesSummary(total=total,
+                        today=r0(sum([x.total for x in sales if x.date == t])),
+                        week=r0(sum([x.total for x in sales if x.date >= w0 and x.date <= t])),
+                        month=r0(sum([x.total for x in sales if x.date >= m0 and x.date <= t])),
+                        last_month=r0(sum([x.total for x in sales if x.date >= lm0 and x.date <= lm_end])),
+                        n_sales=len(sales), birds_sold=birds_sold, bird_income=bird_income,
+                        avg_bird_price=r0(bird_income / birds_sold) if birds_sold > 0 else 0.0,
+                        eggs_sold=eggs_sold, egg_income=egg_income,
+                        avg_tray_price=r0(egg_income / eggs_sold * 30.0) if eggs_sold > 0 else 0.0,
+                        bird_pct=r1(100.0 * bird_income / total) if total > 0 else 0.0,
+                        egg_pct=r1(100.0 * egg_income / total) if total > 0 else 0.0,
+                        day_labels=day_labels, day_values=day_values,
+                        month_labels=month_labels, month_values=month_values,
+                        buyer_names=[str(z[1]) for z in bv], buyer_values=[float(z[0]) for z in bv],
+                        batch_labels=[b.batch_id for b in farm_batches(f)],
+                        batch_values=[batch_money(b, 0.0).income for b in farm_batches(f)],
+                        open_orders_value=r0(sum([o.qty * o.price_each for o in open_o])), open_orders=len(open_o));
+}
