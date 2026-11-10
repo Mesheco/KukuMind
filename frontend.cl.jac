@@ -145,7 +145,7 @@ def:pub app -> JsxElement {
                     } elif page == "health" {
                         <HealthPage lang={lang} farm={farm as FarmView} onFarm={set_farm} lines={lines_of("health")} busy={busy_agent == "health"} onSend={send} />
                     } elif page == "hatchery" {
-                        <HatcheryPage farm={farm as FarmView} onFarm={set_farm} lines={lines_of("hatchery")} busy={busy_agent == "hatchery"} onSend={send} />
+                        <HatcheryPage farm={farm as FarmView} onFarm={set_farm} lines={lines_of("hatchery")} busy={busy_agent == "hatchery"} onSend={send} language={lang} />
                     } elif page == "advice" {
                         <AdvisorPage farm={farm as FarmView} lines={lines_of("advice")} busy={busy_agent == "advice"} onSend={send} />
                     } elif page == "feed" {

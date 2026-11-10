@@ -1,8 +1,18 @@
-# private data - never upload
-customers.json
-whatsapp_usage.json
-marketing_drafts.txt
-marketing_drafts.json
-chats/
-.env
+# Jac installation (Python) - never upload
+jac-env/
+
+# Saved farm data, build output and caches
+.jac/
+livetest/.jac/
+node_modules/
 __pycache__/
+
+# Editor folders
+.vscode/
+.idea/
+
+# Helper script (Python) - not part of KukuMind
+check.py
+
+# Secrets
+.env

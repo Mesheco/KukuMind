@@ -1,8 +1,10 @@
-"""Hatchery agent page: every egg set day by day, candling and hatch results, and the hatch history."""
+"""Hatchery agent page: every egg set day by day with its calendar and expected hatch date, candling and hatch
+results, egg selection and incubator checks, hatch analysis, the AI hatchery teacher, and the hatch history."""
 
 import from .ui { AgentHead, Tab, Field, Choice, Notice, Stat }
 import from .AgentChat { AgentChat }
 import from .AgentsPanel { agent_info }
+import from .HatchTools { HatchCalendar, EggSelectionCard, IncubatorCheckCard, HatchAnalysisCard, LearnCard }
 
 sv import from ..farm { FarmView, EggSetView, hatchery_action, next_day }
 
@@ -27,6 +29,10 @@ def:pub EggSetCard(e: EggSetView, houses: list[str], onAction: Callable[[str, st
                 <strong>{"🥚 " + e.set_id + " · " + str(e.eggs_set) + " " + e.bird_type + " eggs"}</strong>
                 <span className="km-chip">{"Day " + str(e.day) + " of 21"}</span>
             </div>
+            <div className="km-small" style={{"marginTop": "0.35rem", "color": "#c8d4e6"}}>
+                {"Set " + e.set_text + " · lockdown " + e.lockdown_text + " · "}
+                <strong style={{"color": "#4ade80"}}>{"expected hatch " + e.hatch_text + (" (in " + str(e.days_to_hatch) + " days)" if e.days_to_hatch > 0 else (" (TODAY)" if e.days_to_hatch == 0 else ""))}</strong>
+            </div>
             <div style={{"position": "relative", "margin": "0.7rem 0 2.2rem"}}>
                 <div className="km-progress"><div style={{"width": str(pct) + "%"}}></div></div>
                 <Milestone day={7} label="Candle 1" now={e.day} />
@@ -50,10 +56,11 @@ def:pub EggSetCard(e: EggSetView, houses: list[str], onAction: Callable[[str, st
 }
 
 def:pub HatcheryPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: list[dict], busy: bool,
-                     onSend: Callable[[str, str, str], None]) -> JsxElement {
+                     onSend: Callable[[str, str, str], None], language: str = "English") -> JsxElement {
     has tab: str = "Incubator";
     has bird_type: str = "kienyeji";
     has eggs: str = "";
+    has set_date: str = "";
     has msg: str = "";
     has ok: bool = True;
 
@@ -74,12 +81,12 @@ def:pub HatcheryPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: 
     def on_action(action: str, set_id: str, n: int, house: str) { act(action, set_id, n, house); }
 
     async def set_now() {
-        res = root spawn hatchery_action(action="set", bird_type=bird_type, eggs=int(parseFloat(eggs or "0")));
+        res = root spawn hatchery_action(action="set", bird_type=bird_type, eggs=int(parseFloat(eggs or "0")), set_date=set_date);
         r = res.reports[0];
         msg = r.message;
         ok = r.ok;
         if r.farm { onFarm(r.farm); }
-        if r.ok { eggs = ""; tab = "Incubator"; }
+        if r.ok { eggs = ""; set_date = ""; tab = "Calendar"; }
     }
     def submit_set(e: FormEvent) { e.preventDefault(); set_now(); }
 
@@ -98,7 +105,12 @@ def:pub HatcheryPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: 
                 <div>
                     <div className="km-tabs">
                         <Tab label="Incubator" current={tab} onPick={pick_tab} />
+                        <Tab label="Calendar" current={tab} onPick={pick_tab} />
                         <Tab label="Set eggs" current={tab} onPick={pick_tab} />
+                        <Tab label="Egg selection" current={tab} onPick={pick_tab} />
+                        <Tab label="Incubator check" current={tab} onPick={pick_tab} />
+                        <Tab label="Hatch analysis" current={tab} onPick={pick_tab} />
+                        <Tab label="Learn & ask" current={tab} onPick={pick_tab} />
                         <Tab label="Hatch history" current={tab} onPick={pick_tab} />
                     </div>
                     <Notice text={msg} ok={ok} />
@@ -135,11 +147,21 @@ def:pub HatcheryPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: 
                                 <Choice label="Type of eggs" value={bird_type} onValue={lambda(v: str) { bird_type = v; }}
                                         options={[["kienyeji", "Kienyeji"], ["broiler", "Broiler"], ["layer", "Layer"]]} />
                                 <Field label="Number of eggs" value={eggs} onValue={lambda(v: str) { eggs = v; }} kind="number" hint="e.g. 300" />
+                                <Field label="Date set (blank = today)" value={set_date} onValue={lambda(v: str) { set_date = v; }} kind="date" />
                             </div>
-                            <div className="km-small" style={{"margin": "0.5rem 0"}}>Use clean eggs not older than 7 days, stored pointed end down.</div>
+                            <div className="km-small" style={{"margin": "0.5rem 0"}}>
+                                KukuMind works out the dates from the set date: candling on day 7 and 14, lockdown on day 18, hatch on day 21 - all shown on the Calendar tab.
+                                Use clean, unwashed eggs not older than 7 days, stored pointed end down at 15-18 C (see "Egg selection" to check them first).
+                            </div>
                             <button type="submit" className="km-btn primary">Save egg set</button>
                         </form>
                     }}
+
+                    {if tab == "Calendar" { <HatchCalendar farm={farm} /> }}
+                    {if tab == "Egg selection" { <EggSelectionCard farm={farm} language={language} /> }}
+                    {if tab == "Incubator check" { <IncubatorCheckCard farm={farm} language={language} /> }}
+                    {if tab == "Hatch analysis" { <HatchAnalysisCard farm={farm} onFarm={onFarm} language={language} /> }}
+                    {if tab == "Learn & ask" { <LearnCard farm={farm} language={language} /> }}
 
                     {if tab == "Hatch history" {
                         <div>
@@ -150,10 +172,10 @@ def:pub HatcheryPage(farm: FarmView, onFarm: Callable[[FarmView], None], lines: 
                             </div>
                             <div className="km-card">
                                 <table className="km-table">
-                                    <thead><tr><th>Set</th><th>Eggs</th><th>Fertile</th><th>Hatched</th><th>Hatch rate</th></tr></thead>
+                                    <thead><tr><th>Set</th><th>Set on</th><th>Eggs</th><th>Fertile</th><th>Hatched</th><th>Hatch rate</th></tr></thead>
                                     <tbody>
                                         {for e in finished {
-                                            <tr key={e.set_id}><td>{e.set_id + " " + e.bird_type}</td><td>{str(e.eggs_set)}</td>
+                                            <tr key={e.set_id}><td>{e.set_id + " " + e.bird_type}{if e.breakdown != "" { <div className="km-small">{e.breakdown}</div> }}</td><td>{e.set_date}</td><td>{str(e.eggs_set)}</td>
                                                 <td>{str(e.fertile) if e.fertile >= 0 else "-"}</td><td>{str(e.hatched)}</td><td>{str(e.hatch_rate) + "%"}</td></tr>
                                         }}
                                     </tbody>

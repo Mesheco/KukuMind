@@ -415,6 +415,8 @@ node EggSet {
     has fertile: int = -1;       # filled after candling
     has hatched: int = -1;       # filled after hatch
     has done: bool = False;
+    has set_date: str = "";      # day the eggs went in (day 0); "" on older sets = worked out from the day count
+    has breakdown: str = "";     # hatch analysis summary (clear / early / mid / late dead...), if done
 }
 
 # What to do on each incubation day
@@ -507,7 +509,7 @@ walker set_eggs {
     has bird_type: str;
     has eggs: int;
     has set_id: str = "";          # "" = give it the next free name (E1, E2, ...)
-    has day: int = 0;
+    has day: int = 0;              # days since the eggs went in (0 = today)
     has note: str = "";
 
     can add with Root entry {
@@ -520,8 +522,12 @@ walker set_eggs {
         if self.set_id == "" {
             self.set_id = next_ref("E", [e.set_id for e in [f -->[?:EggSet]]]);
         }
-        f ++> EggSet(set_id=self.set_id, bird_type=self.bird_type, eggs_set=self.eggs, day=self.day);
-        self.note = f"Egg set {self.set_id} saved: {self.eggs} {self.bird_type} eggs in the incubator (day {self.day}). Candling on day 7 and 14, lockdown day 18, hatch day 21.";
+        day = max(0, self.day);
+        set_on = (date.fromisoformat(today()) - timedelta(days=day)).isoformat();
+        e = (f ++> EggSet(set_id=self.set_id, bird_type=self.bird_type, eggs_set=self.eggs, day=day, set_date=set_on))[0];
+        self.note = (f"Egg set {self.set_id} saved: {self.eggs} {self.bird_type} eggs, set on {nice_long(set_on)} (day {day}). "
+                     + f"Candling: {nice_long(egg_date(e, 7))} and {nice_long(egg_date(e, 14))}. Lockdown: {nice_long(egg_date(e, 18))}. "
+                     + f"Expected hatch: {nice_long(egg_date(e, INCUBATION_DAYS))}.");
         print(self.note);
     }
 }
@@ -1544,6 +1550,7 @@ obj ParsedHatch {
     has fertile: int;     # fertile eggs found at candling
     has hatched: int;     # chicks hatched
     has house: str;       # house name if mentioned, e.g. "House A", else ""
+    has days_ago: int;    # for "set": 0 = today/leo, 1 = yesterday/jana, 2 = juzi, N = N days ago; 0 if not said
     has language: str;
 }
 
@@ -1694,7 +1701,7 @@ walker kukumind {
             note = "";
             if ph.action == "set" and ph.eggs > 0 {
                 kind = ph.bird_type if ph.bird_type in ["broiler", "layer", "kienyeji"] else "kienyeji";
-                ws = here spawn set_eggs(bird_type=kind, eggs=ph.eggs, day=0);
+                ws = here spawn set_eggs(bird_type=kind, eggs=ph.eggs, day=max(0, ph.days_ago));
                 note = ws.note;
             } elif ph.action == "candle" and ph.set_id != "" {
                 wc = here spawn record_candling(set_id=ph.set_id, fertile=ph.fertile);
@@ -1708,8 +1715,9 @@ walker kukumind {
             if note != "" {
                 self.reply = plain_text(confirm_action(note, reply_lang(self.language, ph.language), LANGUAGE_GUIDE));
             } else {
-                a = here spawn ask_advisor(question=self.text, language=r.language);
-                self.reply = a.reply;
+                # the Hatchery teacher: egg selection, storage, incubation, candling, lockdown, hatching, poor hatches
+                self.reply = plain_text(hatchery_answer(self.text, hatch_guide_text(), hatch_facts(f),
+                                                        reply_lang(self.language, ph.language or r.language), LANGUAGE_GUIDE));
             }
 
         } elif self.intent == "sales" {
@@ -2113,6 +2121,9 @@ obj FarmView {
     has eggs_in_store: int = 0;
     has today: str = "";
     has sales_summary: SalesSummary = SalesSummary();
+    has hatch_months: list[CalMonth] = [];
+    has hatch_upcoming: list[CalEvent] = [];     # every coming incubation event, soonest first
+    has hatch_topics: list[HatchTopic] = [];
 }
 
 obj OrderView {
@@ -2202,6 +2213,21 @@ obj EggSetView {
     has done: bool;
     has task: str;
     has hatch_rate: float = 0.0;
+    has set_date: str = "";
+    has set_text: str = "";
+    has hatch_date: str = "";       # expected hatch date
+    has hatch_text: str = "";       # "Friday 20 November"
+    has hatch_short: str = "";      # "Fri 20 Nov"
+    has lockdown_text: str = "";
+    has days_to_hatch: int = 0;
+    has fertility: float = -1.0;    # % fertile at candling
+    has breakdown: str = "";
+    has events: list[CalEvent] = [];
+}
+
+obj HatchTopic {
+    has title: str;
+    has points: list[str] = [];
 }
 
 obj VaccineRow {
@@ -2396,6 +2422,7 @@ def farm_view(f: Farm) -> FarmView {
                     orders=order_views(f), supplies=supply_views(f), vet_visits=visit_views(f),
                     supply_kinds=SUPPLY_KINDS, eggs_in_store=sum([max(0, eggs_in_store(b)) for b in farm_batches(f)]),
                     today=today(), sales_summary=sales_summary(f),
+                    hatch_months=hatch_months(f), hatch_upcoming=hatch_upcoming(f), hatch_topics=[HatchTopic(title=str(x[0]), points=[str(p) for p in x[1]]) for x in HATCH_TOPICS],
                     health_rows=[health_row(b) for b in farm_batches(f)],
                     vet_name=farm_vet(f).name, vet_phone=farm_vet(f).phone,
                     egg_set_views=[egg_set_view(e) for e in [f -->[?:EggSet]]],
@@ -2521,8 +2548,14 @@ def health_row(b: Batch) -> HealthRow {
 def egg_set_view(e: EggSet) -> EggSetView {
     rate = 100.0 * e.hatched / e.eggs_set if e.hatched > 0 and e.eggs_set > 0 else 0.0;
     task = "Hatched" if e.done else hatchery_task(e.day);
+    hd = egg_date(e, INCUBATION_DAYS);
     return EggSetView(set_id=e.set_id, bird_type=e.bird_type, eggs_set=e.eggs_set, day=e.day,
-                      fertile=e.fertile, hatched=e.hatched, done=e.done, task=task, hatch_rate=r1(rate));
+                      fertile=e.fertile, hatched=e.hatched, done=e.done, task=task, hatch_rate=r1(rate),
+                      set_date=egg_set_date(e), set_text=nice_long(egg_set_date(e)), hatch_date=hd, hatch_text=nice_long(hd), hatch_short=date.fromisoformat(hd).strftime("%a %d %b"),
+                      lockdown_text=nice_long(egg_date(e, 18)),
+                      days_to_hatch=(date.fromisoformat(hd) - date.fromisoformat(today())).days,
+                      fertility=r1(pct(e.fertile, e.eggs_set)) if e.fertile >= 0 else -1.0,
+                      breakdown=e.breakdown, events=egg_calendar(e));
 }
 
 def batch_plan(b: Batch) -> BatchPlan {
@@ -2792,6 +2825,7 @@ walker:pub hatchery_action {
     has fertile: int = 0;
     has hatched: int = 0;
     has house: str = "";
+    has set_date: str = "";       # YYYY-MM-DD the eggs went in ("" = today)
     has reports: list[ActionResult] = [];
 
     can act with Root entry {
@@ -2802,7 +2836,19 @@ walker:pub hatchery_action {
                 report ActionResult(ok=False, message="Enter how many eggs you put in the incubator.", farm=farm_view(f));
                 disengage;
             }
-            w = here spawn set_eggs(bird_type=self.bird_type, eggs=self.eggs, day=0);
+            ago = 0;
+            if self.set_date != "" {
+                try {
+                    ago = (date.fromisoformat(today()) - date.fromisoformat(self.set_date)).days;
+                } except Exception as err {
+                    ago = 0;
+                }
+            }
+            if ago < 0 or ago > INCUBATION_DAYS + 3 {
+                report ActionResult(ok=False, message=f"The set date must be between today and {INCUBATION_DAYS + 3} days ago. Egg set NOT saved.", farm=farm_view(f));
+                disengage;
+            }
+            w = here spawn set_eggs(bird_type=self.bird_type, eggs=self.eggs, day=ago);
             report ActionResult(ok=True, message=w.note, farm=farm_view(f));
         } elif self.action == "candle" {
             if len(sets) == 0 or self.fertile < 0 or self.fertile > sets[0].eggs_set {
@@ -4114,7 +4160,7 @@ def farm_facts(f: Farm) -> str {
         x = f"{e.set_id}: {e.eggs_set:,} {e.bird_type} eggs, day {e.day}";
         if e.fertile >= 0 { x = x + f", {e.fertile:,} fertile at candling ({100.0 * e.fertile / e.eggs_set:.0f}%)"; }
         if e.done { x = x + f", hatched {max(0, e.hatched):,} chicks ({100.0 * max(0, e.hatched) / e.eggs_set:.0f}% of eggs set" + (f", {100.0 * max(0, e.hatched) / e.fertile:.0f}% of fertile eggs" if e.fertile > 0 else "") + ")"; }
-        else { x = x + f". Next: {hatchery_task(e.day)}"; }
+        else { x = x + f", set on {egg_set_date(e)}, lockdown {egg_date(e, 18)}, expected hatch {egg_date(e, INCUBATION_DAYS)}. Next: {hatchery_task(e.day)}"; }
         out.append(x);
     }
 
@@ -4191,6 +4237,522 @@ def sales_summary(f: Farm) -> SalesSummary {
                         batch_labels=[b.batch_id for b in farm_batches(f)],
                         batch_values=[batch_money(b, 0.0).income for b in farm_batches(f)],
                         open_orders_value=r0(sum([o.qty * o.price_each for o in open_o])), open_orders=len(open_o));
+}
+
+
+# =====================================================================
+# STEP 8: THE HATCHERY TEACHER - from egg selection to hatching
+#   * a calendar with every date worked out by code (set, candling, lockdown, expected hatch)
+#   * three checks done by code: egg selection, incubator settings, hatch result analysis
+#   * an AI teacher that answers any hatchery question from the guide below + the farm's own egg sets
+# =====================================================================
+import calendar;
+
+glob INCUBATION_DAYS = 21;      # chicken eggs (kienyeji, broiler, layer)
+
+# The date of a given incubation day for an egg set (day 0 = the day the eggs went in)
+def egg_set_date(e: EggSet) -> str {
+    if e.set_date != "" { return e.set_date; }
+    return (date.fromisoformat(today()) - timedelta(days=e.day)).isoformat();
+}
+
+def egg_date(e: EggSet, day: int) -> str {
+    return (date.fromisoformat(egg_set_date(e)) + timedelta(days=day)).isoformat();
+}
+
+# "Friday 20 November"
+def nice_long(d: str) -> str {
+    try {
+        return date.fromisoformat(d).strftime("%A %d %B");
+    } except Exception as err {
+        return d;
+    }
+}
+
+obj CalEvent {
+    has date: str;
+    has day: int;            # incubation day
+    has set_id: str;
+    has title: str;
+    has detail: str;
+    has kind: str;           # set, candle, prep, lockdown, hatch, after
+    has short: str = "";     # short label for the month grid
+    has status: str = "";    # done, today, soon, later
+}
+
+# Every important day of one egg set, with its date (worked out by code)
+def egg_calendar(e: EggSet) -> list[CalEvent] {
+    t = today();
+    plan = [
+        [0, "set", "Eggs set", "Set", "Eggs in at 37.5 C and 50-55% humidity. Start turning 3-5 times a day (odd number)."],
+        [7, "candle", "Candle 1", "Candle 1", "Remove clear (infertile) eggs and blood rings. Record the fertile eggs."],
+        [14, "candle", "Candle 2", "Candle 2", "Remove eggs that stopped growing (no movement, no veins)."],
+        [17, "prep", "Get ready", "Prepare", "Clean and warm the brooder (32-35 C), prepare water and chick mash, check the hatching trays."],
+        [18, "lockdown", "Lockdown", "Lockdown", "Last candling, stop turning, lay eggs flat, raise humidity to 65-75%. Keep the incubator closed from now."],
+        [19, "lockdown", "Pipping starts", "Pipping", "Chicks break the inner then the outer shell. Do not open the incubator."],
+        [INCUBATION_DAYS, "hatch", "Expected hatch", "HATCH", "Most chicks hatch today. Leave them to dry and fluff up (12-24 hours) before moving them."],
+        [INCUBATION_DAYS + 1, "after", "Pull chicks", "Pull out", "Move dry chicks to the brooder, count them and record the hatch. Open unhatched eggs to see why (Hatch analysis). Clean the incubator."]
+    ];
+    out: list[CalEvent] = [];
+    for p in plan {
+        d = egg_date(e, int(p[0]));
+        st = "done" if d < t else ("today" if d == t else ("soon" if due_status(d, t) == "soon" else "later"));
+        if e.done and st != "done" { continue; }
+        out.append(CalEvent(date=d, day=int(p[0]), set_id=e.set_id, title=str(p[2]), short=str(p[3]), detail=str(p[4]), kind=str(p[1]), status=st));
+    }
+    return out;
+}
+
+obj CalCell {
+    has date: str;
+    has day_num: int;        # 0 = empty cell
+    has today: bool = False;
+    has marks: list[str] = [];   # "E1 Candle 1", ...
+    has kinds: list[str] = [];
+}
+
+obj CalMonth {
+    has label: str;          # "November 2026"
+    has cells: list[CalCell] = [];     # Monday first, 7 per row
+}
+
+# Month grids (this month and the next ones that have events), marks worked out by code
+def hatch_months(f: Farm) -> list[CalMonth] {
+    t = today();
+    td = date.fromisoformat(t);
+    events = [ev for e in [f -->[?:EggSet]] if not e.done for ev in egg_calendar(e)];
+    months: list[str] = [t[:7]];
+    for ev in events {
+        if ev.date[:7] not in months and ev.date >= t[:8] + "01" { months.append(ev.date[:7]); }
+    }
+    months = sorted(months)[:3];
+    out: list[CalMonth] = [];
+    for ym in months {
+        y = int(ym[:4]);
+        m = int(ym[5:7]);
+        first_wd = calendar.monthrange(y, m)[0];       # 0 = Monday
+        n_days = calendar.monthrange(y, m)[1];
+        cells: list[CalCell] = [CalCell(date="", day_num=0) for i in range(first_wd)];
+        for dn in range(1, n_days + 1) {
+            d = f"{ym}-{dn:02d}";
+            evs = [ev for ev in events if ev.date == d];
+            cells.append(CalCell(date=d, day_num=dn, today=d == t, marks=[f"{ev.set_id} {ev.short or ev.title}" for ev in evs], kinds=[ev.kind for ev in evs]));
+        }
+        while len(cells) % 7 != 0 { cells.append(CalCell(date="", day_num=0)); }
+        out.append(CalMonth(label=date(y, m, 1).strftime("%B %Y"), cells=cells));
+    }
+    return out;
+}
+
+# ---------------------------------------------------------------------
+# THE HATCHERY GUIDE (what the AI teacher teaches from; also shown on the Learn tab)
+# ---------------------------------------------------------------------
+glob HATCH_TOPICS = [
+    ["1. Choosing eggs that qualify for hatching", [
+        "Take eggs only from healthy, vaccinated, well-fed breeders: hens about 26-60 weeks old, with active cocks (1 cock for 8-10 kienyeji hens).",
+        "Size: choose eggs close to the flock's average. Kienyeji eggs are usually about 45-55 g, commercial breeds about 52-65 g. Leave out very small and very large (double-yolk) eggs.",
+        "Shape and shell: normal oval shape, smooth, strong shell. Reject cracked (check against a light), thin, rough, wrinkled or misshapen eggs.",
+        "Clean: collect 3-4 times a day so eggs stay clean. Do not wash hatching eggs - washing removes the protective layer. Lightly dry-clean small spots with fine sandpaper or a dry cloth; leave out very dirty eggs.",
+        "Never set eggs that were in a cold fridge, left in the sun, or kept more than 14 days."]],
+    ["2. Storing eggs before setting", [
+        "Store at 15-18 C (a cool room, not a fridge) with humidity about 70-80%.",
+        "Keep them pointed end DOWN in a clean tray.",
+        "Set within 7 days. After 7 days hatchability falls a little every extra day, and much more after 14 days. If stored over 7 days, tilt or turn the trays once a day.",
+        "Before setting, let eggs warm to room temperature for 6-8 hours so they do not 'sweat' (water drops on the shell bring germs)."]],
+    ["3. Preparing the incubator", [
+        "Clean and disinfect the incubator, trays and water pans after every hatch; let them dry.",
+        "Run it empty for 24 hours and check that temperature and humidity stay steady before loading.",
+        "Check the thermometer and hygrometer against a good one - a wrong thermometer is a common cause of poor hatches.",
+        "Keep the incubator in a room at about 20-25 C, out of direct sun and draughts, with fresh air. Have a back-up for power cuts (generator, solar or a warm room)."]],
+    ["4. Loading (setting) the eggs", [
+        "Place eggs pointed end down (or lying on their side in roller trays). The air cell at the big end must be up.",
+        "Mark each egg (X on one side, O on the other) if you turn by hand.",
+        "Write the set date - KukuMind works out the candling, lockdown and hatch dates from it.",
+        "Do not overload: follow the incubator's capacity so air can flow."]],
+    ["5. Incubation: days 0-17", [
+        "Temperature: forced-air (fan) incubator 37.5 C (good range 37.2-37.8 C). Still-air incubator (no fan) 38.3-38.9 C measured at the top of the eggs.",
+        "Humidity: 50-55% (wet bulb about 28-29 C). Too high or too low both kill chicks at hatch time.",
+        "Turning: at least 3 times a day, better 5 - always an odd number so eggs do not spend two nights on the same side. Turn gently, about 45 degrees each way.",
+        "Ventilation: open the vents a little more as the embryos grow; they need more fresh air after day 10.",
+        "Keep a daily record of temperature and humidity. Short power cuts (under 2-3 hours) are usually survived; keep the lid closed to hold the heat."]],
+    ["6. Candling", [
+        "Day 7: a fertile egg shows a dark spot with spider-like blood vessels. A clear egg is infertile - remove it. A red ring (blood ring) means the embryo died early - remove it.",
+        "Day 14: the egg is mostly dark with a clear air cell; you may see movement. Remove eggs that look cloudy, have no veins, or smell.",
+        "Day 18 (before lockdown): the air cell is bigger and tilted; remove any eggs that are clearly dead.",
+        "Candle quickly in a dark room and put the eggs back so they do not cool down."]],
+    ["7. Lockdown and hatching: days 18-21", [
+        "Day 18: stop turning, lay eggs flat on the hatching tray, raise humidity to 65-75%, temperature 37.0-37.5 C.",
+        "Do not open the incubator from lockdown until the hatch is over - opening drops the humidity and chicks get stuck in the shell.",
+        "Day 19-20: chicks pip (first a hole in the inner membrane, then the shell). They can rest 12-24 hours between pip and hatch - this is normal.",
+        "Day 21: hatch day (20.5-21.5 days). Do not pull chicks out of shells; helping usually causes bleeding and weak chicks.",
+        "Leave chicks to dry and fluff up 12-24 hours in the incubator, then move them to a brooder at 32-35 C with clean water (glucose or vitamins) and chick mash."]],
+    ["8. After the hatch", [
+        "Count and record the chicks (KukuMind makes them a new batch).",
+        "Open the eggs that did not hatch and record what you see (Hatch analysis): clear, early dead, mid dead, late dead, pipped but dead. This shows what to fix next time.",
+        "Clean, disinfect and dry the incubator before the next set.",
+        "Day-old chicks: Marek's vaccine at the hatchery if possible, Newcastle around day 7 - see the Advisor's vaccination plan."]],
+    ["9. Good hatchability - what to aim for", [
+        "Fertility (fertile eggs / eggs set): 85-95%.",
+        "Hatch of fertile eggs (chicks / fertile eggs): 85% or more.",
+        "Hatch of eggs set (chicks / eggs set): 75-85% is good; under 60% means something must be fixed.",
+        "The big five for a good hatch: fresh clean eggs from healthy breeders, correct and steady temperature, correct humidity at each stage, regular turning until day 18, and fresh air."]],
+    ["10. Why hatches fail (poor hatchability)", [
+        "Many clear eggs: infertile eggs - too few, old or tired cocks, too many hens per cock, poor breeder feed, heat stress; or eggs stored too long or too warm (they look clear but died very early).",
+        "Early deaths (blood rings, days 1-7): eggs stored too long, too warm or too cold, rough handling or shaking, very high temperature in the first days, dirty eggs, long power cuts.",
+        "Mid deaths (days 8-17): poor breeder nutrition (vitamins and minerals), wrong temperature, eggs not turned, germs, power cuts.",
+        "Late deaths (days 18-21, chick fully formed, not pipped): humidity too high or too low, poor ventilation, high temperature at the end, eggs set small end up, turning stopped too late.",
+        "Pipped but dead in the shell: humidity too low at lockdown (opening the incubator), low temperature, poor air.",
+        "Chicks hatch early (day 19-20), noisy, small: temperature too high. Chicks hatch late (day 22+): temperature too low or old eggs.",
+        "Sticky chicks covered in egg white: humidity too low or temperature too high at hatch.",
+        "Mushy, smelly chicks with open navels: germs - dirty eggs or incubator, humidity too high.",
+        "Weak chicks, splayed legs, crooked toes: wrong temperature, smooth hatching tray floor, poor breeder feed.",
+        "Exploding or rotten eggs: dirty or cracked eggs - remove them at candling before they burst and spread germs."]]
+];
+
+def hatch_guide_text() -> str {
+    out: list[str] = [];
+    for t in HATCH_TOPICS {
+        out.append(str(t[0]));
+        for p in t[1] { out.append(" - " + str(p)); }
+    }
+    return "\n".join(out);
+}
+
+# ---------------------------------------------------------------------
+# CHECKS (pure code; the AI only explains the results)
+# ---------------------------------------------------------------------
+obj CheckItem {
+    has status: str;     # good, warn, bad
+    has text: str;
+}
+
+obj HatchCheck {
+    has ok: bool = True;
+    has kind: str = "";
+    has verdict: str = "";
+    has items: list[CheckItem] = [];
+    has numbers: list[str] = [];
+    has advice: str = "";
+    has farm: FarmView | None = None;
+}
+
+def egg_selection_items(bird_type: str, weight_g: float, storage_days: int, storage_temp: float, pointed_down: bool,
+                        cracked: int, dirty: int, washed: bool, hens_per_cock: float, hen_age_weeks: int) -> list[CheckItem] {
+    out: list[CheckItem] = [];
+    lo = 45.0 if bird_type == "kienyeji" else 52.0;
+    hi = 58.0 if bird_type == "kienyeji" else 66.0;
+    if weight_g > 0 {
+        if weight_g < lo - 5 or weight_g > hi + 5 {
+            out.append(CheckItem(status="bad", text=f"Average egg weight {weight_g:.0f} g is far from the usual {lo:.0f}-{hi:.0f} g for {bird_type} eggs - very small or very large eggs hatch poorly."));
+        } elif weight_g < lo or weight_g > hi {
+            out.append(CheckItem(status="warn", text=f"Average egg weight {weight_g:.0f} g is a little outside {lo:.0f}-{hi:.0f} g. Pick eggs close to the average and leave out the smallest and largest."));
+        } else {
+            out.append(CheckItem(status="good", text=f"Egg weight {weight_g:.0f} g is in the good range ({lo:.0f}-{hi:.0f} g)."));
+        }
+    }
+    if storage_days > 14 {
+        out.append(CheckItem(status="bad", text=f"Stored {storage_days} days: too old. Eggs over 14 days hatch badly - do not set them."));
+    } elif storage_days > 7 {
+        out.append(CheckItem(status="warn", text=f"Stored {storage_days} days: set them as soon as possible. After 7 days hatchability falls each extra day; turn stored eggs once a day."));
+    } elif storage_days >= 0 {
+        out.append(CheckItem(status="good", text=f"Stored {storage_days} days: fresh enough (7 days or less)."));
+    }
+    if storage_temp > 0 {
+        if storage_temp > 24 {
+            out.append(CheckItem(status="bad", text=f"Stored at {storage_temp:.0f} C: too warm - above about 24 C the embryo starts growing and then dies. Store at 15-18 C."));
+        } elif storage_temp < 10 {
+            out.append(CheckItem(status="bad", text=f"Stored at {storage_temp:.0f} C: too cold (like a fridge) - embryos are damaged. Store at 15-18 C."));
+        } elif storage_temp > 19 or storage_temp < 13 {
+            out.append(CheckItem(status="warn", text=f"Stored at {storage_temp:.0f} C: the best is 15-18 C (a cool room)."));
+        } else {
+            out.append(CheckItem(status="good", text=f"Stored at {storage_temp:.0f} C: good (15-18 C)."));
+        }
+    }
+    out.append(CheckItem(status="good" if pointed_down else "warn",
+                         text="Stored pointed end down: good." if pointed_down else "Store eggs pointed end DOWN so the air cell stays at the big end."));
+    if cracked > 0 { out.append(CheckItem(status="bad", text=f"{cracked} cracked egg(s): remove them - cracked eggs do not hatch and can rot and spread germs.")); }
+    if dirty > 0 { out.append(CheckItem(status="warn", text=f"{dirty} dirty egg(s): lightly dry-clean small spots; leave out very dirty eggs. Collect eggs 3-4 times a day and keep nests clean.")); }
+    if washed { out.append(CheckItem(status="warn", text="Washed eggs: washing removes the shell's protective layer and lets germs in. Do not wash hatching eggs.")); }
+    if hens_per_cock > 0 {
+        if hens_per_cock > 12 {
+            out.append(CheckItem(status="bad", text=f"{hens_per_cock:.0f} hens per cock: too many - many eggs will be infertile. Keep about 1 cock for 8-10 hens."));
+        } elif hens_per_cock > 10 {
+            out.append(CheckItem(status="warn", text=f"{hens_per_cock:.0f} hens per cock: a bit high. 1 cock for 8-10 hens gives better fertility."));
+        } else {
+            out.append(CheckItem(status="good", text=f"{hens_per_cock:.0f} hens per cock: good for fertility."));
+        }
+    }
+    if hen_age_weeks > 0 {
+        if hen_age_weeks < 24 {
+            out.append(CheckItem(status="warn", text=f"Hens {hen_age_weeks} weeks old: very young hens lay small eggs that hatch less well. Wait until about 26 weeks."));
+        } elif hen_age_weeks > 72 {
+            out.append(CheckItem(status="warn", text=f"Hens {hen_age_weeks} weeks old: older hens give lower fertility and weaker shells."));
+        } else {
+            out.append(CheckItem(status="good", text=f"Hens {hen_age_weeks} weeks old: good breeding age."));
+        }
+    }
+    return out;
+}
+
+def incubator_items(day: int, temp: float, humidity: float, turns: int, fan: bool) -> list[CheckItem] {
+    out: list[CheckItem] = [];
+    lockdown = day >= 18;
+    if fan {
+        t_lo = 37.0 if lockdown else 37.2;
+        t_hi = 37.5 if lockdown else 37.8;
+    } else {
+        t_lo = 37.8 if lockdown else 38.3;
+        t_hi = 38.6 if lockdown else 38.9;
+    }
+    h_lo = 65.0 if lockdown else 50.0;
+    h_hi = 75.0 if lockdown else 55.0;
+    stage = f"day {day} ({'lockdown' if lockdown else 'incubation'}, {'fan' if fan else 'still-air'} incubator)";
+    if temp > 0 {
+        if temp > t_hi + 0.5 or temp < t_lo - 1.0 {
+            out.append(CheckItem(status="bad", text=f"Temperature {temp:.1f} C is far from {t_lo:.1f}-{t_hi:.1f} C for {stage}. Fix it now - temperature is the biggest cause of poor hatches."));
+        } elif temp > t_hi or temp < t_lo {
+            out.append(CheckItem(status="warn", text=f"Temperature {temp:.1f} C is a little outside {t_lo:.1f}-{t_hi:.1f} C for {stage}. Adjust slowly and check your thermometer."));
+        } else {
+            out.append(CheckItem(status="good", text=f"Temperature {temp:.1f} C is right for {stage}."));
+        }
+    }
+    if humidity > 0 {
+        if humidity < h_lo - 10 or humidity > h_hi + 10 {
+            out.append(CheckItem(status="bad", text=f"Humidity {humidity:.0f}% is far from {h_lo:.0f}-{h_hi:.0f}% for {stage}."
+                                 + (" Too dry at hatch makes chicks stick in the shell - add water or a wet sponge." if lockdown and humidity < h_lo else "")
+                                 + (" Too wet makes chicks mushy and drown in the shell - reduce the water area and open vents a little." if humidity > h_hi else "")));
+        } elif humidity < h_lo or humidity > h_hi {
+            out.append(CheckItem(status="warn", text=f"Humidity {humidity:.0f}% is a little outside {h_lo:.0f}-{h_hi:.0f}% for {stage}."));
+        } else {
+            out.append(CheckItem(status="good", text=f"Humidity {humidity:.0f}% is right for {stage}."));
+        }
+    }
+    if lockdown {
+        out.append(CheckItem(status="good" if turns == 0 else "bad",
+                             text="Not turning during lockdown: correct." if turns == 0 else f"Turning {turns} times a day in lockdown: STOP turning from day 18 so chicks can get into hatching position."));
+    } elif turns >= 0 {
+        if turns < 3 {
+            out.append(CheckItem(status="bad", text=f"Turning {turns} times a day: too few - embryos stick to the shell. Turn at least 3 times a day, better 5."));
+        } elif turns % 2 == 0 and turns < 24 {
+            out.append(CheckItem(status="warn", text=f"Turning {turns} times a day: use an odd number (3, 5 or 7) so eggs do not stay on the same side every night."));
+        } else {
+            out.append(CheckItem(status="good", text=f"Turning {turns} times a day: good."));
+        }
+    }
+    if day > INCUBATION_DAYS + 1 {
+        out.append(CheckItem(status="warn", text=f"Day {day}: past the hatch day. Eggs not hatched by day 22-23 will usually not hatch - candle them, then open them to learn why."));
+    }
+    return out;
+}
+
+def pct(a: int, b: int) -> float {
+    return 100.0 * a / b if b > 0 else 0.0;
+}
+
+def check_verdict(items: list[CheckItem]) -> str {
+    bad = len([i for i in items if i.status == "bad"]);
+    warn = len([i for i in items if i.status == "warn"]);
+    if bad > 0 { return f"{bad} problem(s) to fix" + (f" and {warn} thing(s) to improve" if warn > 0 else "") + "."; }
+    if warn > 0 { return f"Mostly good - {warn} thing(s) to improve."; }
+    return "All good.";
+}
+
+"""You are KukuMind's Hatchery teacher for poultry farmers in Kenya. Using ONLY the guide, the check results and
+the farm's egg sets given, explain to the farmer in simple words: what the results mean, the most likely causes of
+any problem, and the practical steps to fix it for this and the next hatch (most important first).
+Numbers in the check results were worked out by code - copy them exactly, do not calculate new ones.
+Never name medicines or doses. Short plain text, no markdown.
+Reply in the language given and follow HOW TO WRITE EVERY REPLY in the language guide."""
+def hatch_coach(topic: str, results: str, guide: str, farm_sets: str, language: str, language_guide: str) -> str by writer();
+
+"""You are KukuMind's Hatchery teacher. Answer the farmer's question about hatching eggs - egg selection,
+storage, the incubator, setting, temperature, humidity, turning, candling, lockdown, hatching, chicks after hatch,
+or why a hatch failed - using the guide and the farm's own egg sets and calendar (dates worked out by code).
+Teach step by step in simple words. Copy dates and numbers exactly; never calculate new ones.
+Never name medicines or doses. Short plain text, no markdown.
+Reply in the language given and follow HOW TO WRITE EVERY REPLY in the language guide."""
+def hatchery_answer(question: str, guide: str, farm_sets: str, language: str, language_guide: str) -> str by writer();
+
+# The farm's egg sets as facts (dates, rates and results worked out by code)
+def hatch_facts(f: Farm) -> str {
+    t = today();
+    out: list[str] = [f"Today is {day_and_date(t)}. Chicken eggs take {INCUBATION_DAYS} days."];
+    for e in [f -->[?:EggSet]] {
+        x = f"{e.set_id}: {e.eggs_set} {e.bird_type} eggs set on {nice_long(egg_set_date(e))}, now day {e.day}";
+        if not e.done {
+            x = x + f"; candling {nice_long(egg_date(e, 7))} and {nice_long(egg_date(e, 14))}, lockdown {nice_long(egg_date(e, 18))}, expected hatch {nice_long(egg_date(e, INCUBATION_DAYS))}";
+            left = (date.fromisoformat(egg_date(e, INCUBATION_DAYS)) - date.fromisoformat(t)).days;
+            x = x + (f" ({left} days from today)" if left > 0 else (" (today)" if left == 0 else f" ({-left} days ago)")) + f". Today's task: {hatchery_task(e.day)}";
+        }
+        if e.fertile >= 0 { x = x + f"; fertile at candling {e.fertile} ({pct(e.fertile, e.eggs_set):.0f}%)"; }
+        if e.done {
+            x = x + f"; hatched {max(0, e.hatched)} chicks ({pct(max(0, e.hatched), e.eggs_set):.0f}% of eggs set" + (f", {pct(max(0, e.hatched), e.fertile):.0f}% of fertile" if e.fertile > 0 else "") + ")";
+        }
+        if e.breakdown != "" { x = x + f"; analysis: {e.breakdown}"; }
+        out.append(x);
+    }
+    if len(out) == 1 { out.append("No eggs set yet."); }
+    return "\n".join(out);
+}
+
+def safe_coach(topic: str, results: str, f: Farm, language: str) -> str {
+    lang = language if language in ["English", "Kiswahili", "Sheng"] else "English";
+    try {
+        return plain_text(hatch_coach(topic, results, hatch_guide_text(), hatch_facts(f), lang, LANGUAGE_GUIDE));
+    } except Exception as err {
+        print(f"Hatchery coach not available: {err}");
+        return "";
+    }
+}
+
+# ---------------------------------------------------------------------
+# WEB API for the hatchery tools
+# ---------------------------------------------------------------------
+walker:pub egg_selection_check {
+    has bird_type: str = "kienyeji";
+    has weight_g: float = 0.0;
+    has storage_days: int = 0;
+    has storage_temp: float = 0.0;
+    has pointed_down: bool = True;
+    has cracked: int = 0;
+    has dirty: int = 0;
+    has washed: bool = False;
+    has hens_per_cock: float = 0.0;
+    has hen_age_weeks: int = 0;
+    has language: str = "English";
+    has reports: list[HatchCheck] = [];
+
+    can go with Root entry {
+        f = farm_now();
+        items = egg_selection_items(self.bird_type, self.weight_g, self.storage_days, self.storage_temp, self.pointed_down,
+                                    self.cracked, self.dirty, self.washed, self.hens_per_cock, self.hen_age_weeks);
+        v = check_verdict(items);
+        res = "\n".join([f"{i.status.upper()}: {i.text}" for i in items]);
+        report HatchCheck(ok=True, kind="selection", verdict=v, items=items,
+                          advice=safe_coach("Are these eggs good for hatching?", v + "\n" + res, f, self.language), farm=farm_view(f));
+    }
+}
+
+walker:pub incubator_check {
+    has day: int = 0;
+    has temp: float = 0.0;
+    has humidity: float = 0.0;
+    has turns: int = 3;
+    has fan: bool = True;
+    has set_id: str = "";
+    has language: str = "English";
+    has reports: list[HatchCheck] = [];
+
+    can go with Root entry {
+        f = farm_now();
+        day = self.day;
+        for e in [f -->[?:EggSet]] { if e.set_id == self.set_id { day = e.day; } }
+        items = incubator_items(day, self.temp, self.humidity, self.turns, self.fan);
+        v = check_verdict(items);
+        res = "\n".join([f"{i.status.upper()}: {i.text}" for i in items]);
+        report HatchCheck(ok=True, kind="incubator", verdict=v, items=items, numbers=[f"Incubation day {day}"],
+                          advice=safe_coach("Are my incubator settings right?", v + "\n" + res, f, self.language), farm=farm_view(f));
+    }
+}
+
+walker:pub hatch_analysis {
+    has set_id: str = "";
+    has eggs_set: int = 0;
+    has clear: int = 0;           # infertile (no development)
+    has early_dead: int = 0;      # days 1-7 (blood ring)
+    has mid_dead: int = 0;        # days 8-17
+    has late_dead: int = 0;       # days 18-21, not pipped
+    has pipped_dead: int = 0;     # pipped but died in the shell
+    has hatched: int = 0;
+    has culls: int = 0;           # weak or deformed chicks
+    has language: str = "English";
+    has reports: list[HatchCheck] = [];
+
+    can go with Root entry {
+        f = farm_now();
+        eggs = self.eggs_set;
+        sets = [e for e in [f -->[?:EggSet]] if e.set_id == self.set_id];
+        if len(sets) > 0 and eggs <= 0 { eggs = sets[0].eggs_set; }
+        counted = self.clear + self.early_dead + self.mid_dead + self.late_dead + self.pipped_dead + self.hatched;
+        if eggs <= 0 or counted > eggs or self.culls > self.hatched or min([self.clear, self.early_dead, self.mid_dead, self.late_dead, self.pipped_dead, self.hatched, self.culls]) < 0 {
+            report HatchCheck(ok=False, kind="analysis", verdict=f"The numbers do not add up: {counted} eggs counted but {eggs} were set (and weak chicks cannot be more than chicks hatched). Please check them.", farm=farm_view(f));
+            disengage;
+        }
+        missing = eggs - counted;
+        fertile = eggs - self.clear;
+        good_chicks = self.hatched - self.culls;
+        dead = self.early_dead + self.mid_dead + self.late_dead + self.pipped_dead;
+        nums = [f"Eggs set: {eggs}" + (f" ({missing} not opened or not counted)" if missing > 0 else ""),
+                f"Fertility: {fertile} of {eggs} = {pct(fertile, eggs):.1f}% (aim for 85-95%)",
+                f"Hatch of fertile eggs: {self.hatched} of {fertile} = {pct(self.hatched, fertile):.1f}% (aim for 85% or more)",
+                f"Hatch of eggs set: {self.hatched} of {eggs} = {pct(self.hatched, eggs):.1f}% (75-85% is good)",
+                f"Good chicks: {good_chicks} ({self.culls} weak or deformed)",
+                f"Embryos that died: {dead} = {pct(dead, fertile):.1f}% of fertile eggs - early {self.early_dead}, mid {self.mid_dead}, late {self.late_dead}, pipped {self.pipped_dead}"];
+        items: list[CheckItem] = [];
+        if pct(fertile, eggs) < 75 {
+            items.append(CheckItem(status="bad", text=f"Low fertility ({pct(fertile, eggs):.0f}%): look at the cocks (number, age, health), hens per cock, breeder feed, and egg storage time and temperature."));
+        } elif pct(fertile, eggs) < 85 {
+            items.append(CheckItem(status="warn", text=f"Fertility {pct(fertile, eggs):.0f}% is fair; 85-95% is possible with 1 active cock for 8-10 hens and fresh eggs."));
+        } else {
+            items.append(CheckItem(status="good", text=f"Fertility {pct(fertile, eggs):.0f}% is good."));
+        }
+        stages = [[self.early_dead, "Early deaths (days 1-7)", "egg storage (too long, too warm or cold), rough handling, very high temperature in the first days, dirty eggs, long power cuts"],
+                  [self.mid_dead, "Mid deaths (days 8-17)", "breeder nutrition, wrong temperature, eggs not turned enough, germs, power cuts"],
+                  [self.late_dead, "Late deaths (days 18-21, not pipped)", "humidity too high or too low, poor ventilation, high temperature at the end, eggs set small end up"],
+                  [self.pipped_dead, "Pipped but dead in shell", "humidity too low at lockdown (incubator opened), low temperature, poor air"]];
+        for st in stages {
+            n = int(st[0]);
+            share = pct(n, fertile);
+            if share >= 5 {
+                items.append(CheckItem(status="bad", text=f"{st[1]}: {n} eggs ({share:.0f}% of fertile - normal is under 2-3%). Most likely causes: {st[2]}."));
+            } elif share >= 3 {
+                items.append(CheckItem(status="warn", text=f"{st[1]}: {n} eggs ({share:.0f}% of fertile), slightly high. Check: {st[2]}."));
+            }
+        }
+        if self.culls > 0 and pct(self.culls, self.hatched) >= 3 {
+            items.append(CheckItem(status="warn", text=f"{self.culls} weak or deformed chicks ({pct(self.culls, self.hatched):.0f}% of hatched): check temperature, humidity at hatch, the hatching tray floor and breeder feed."));
+        }
+        hof = pct(self.hatched, fertile);
+        if hof >= 85 {
+            items.append(CheckItem(status="good", text=f"Hatch of fertile eggs {hof:.0f}%: good incubation."));
+        } elif hof >= 70 {
+            items.append(CheckItem(status="warn", text=f"Hatch of fertile eggs {hof:.0f}%: below the 85% target - the stages above show where the chicks were lost."));
+        } else {
+            items.append(CheckItem(status="bad", text=f"Hatch of fertile eggs {hof:.0f}%: low - most losses happened in the incubator. Check the thermometer, humidity and turning first."));
+        }
+        v = check_verdict(items);
+        summary = (f"fertility {pct(fertile, eggs):.0f}%, hatch of fertile {pct(self.hatched, fertile):.0f}%, hatch of set {pct(self.hatched, eggs):.0f}%; "
+                   + f"clear {self.clear}, early dead {self.early_dead}, mid dead {self.mid_dead}, late dead {self.late_dead}, pipped dead {self.pipped_dead}, weak {self.culls}");
+        if len(sets) > 0 { sets[0].breakdown = summary; }
+        res = "\n".join(nums) + "\n" + "\n".join([f"{i.status.upper()}: {i.text}" for i in items]);
+        report HatchCheck(ok=True, kind="analysis", verdict=v, items=items, numbers=nums,
+                          advice=safe_coach("Why did my hatch turn out like this, and how do I do better next time?", v + "\n" + res, f, self.language),
+                          farm=farm_view(f));
+    }
+}
+
+walker:pub hatchery_ask {
+    has question: str;
+    has language: str = "English";
+    has reports: list[HatchCheck] = [];
+
+    can go with Root entry {
+        f = farm_now();
+        lang = self.language if self.language in ["English", "Kiswahili", "Sheng"] else "English";
+        ans = "";
+        try {
+            ans = plain_text(hatchery_answer(self.question, hatch_guide_text(), hatch_facts(f), lang, LANGUAGE_GUIDE));
+        } except Exception as err {
+            ans = "The hatchery teacher is not available right now. Please read the guide on this page or try again.";
+        }
+        report HatchCheck(ok=True, kind="ask", advice=ans);
+    }
+}
+
+def hatch_upcoming(f: Farm) -> list[CalEvent] {
+    evs = [ev for e in [f -->[?:EggSet]] if not e.done for ev in egg_calendar(e) if ev.status != "done"];
+    pairs = sorted([(evs[i].date, evs[i].day, i) for i in range(len(evs))]);
+    return [evs[int(p[2])] for p in pairs];
 }
 
 # =====================================================================

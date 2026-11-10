@@ -73,6 +73,18 @@ A worker just writes *"B1 leo vifo mbili, chakula gunia moja"* (B1 today: 2 deat
 | 🌾 **Feed & inventory** | Feed in store, days left, bags to order, expected vs used per batch (wastage or sick-bird flags), deliveries and price per kg. | *"Msosi itatosha siku ngapi?"* |
 | 💰 **Sales & marketing** | Records bird and egg sales, finds what is ready for market, writes WhatsApp offers to buyers, full profit statement per batch and for the farm. | *"Sold 50 B3 layers at 450 each to Mama Njeri"* |
 
+### The Hatchery agent: from egg selection to hatching
+
+| Tab | What it does |
+|---|---|
+| **Calendar** | Every egg set on a month calendar: eggs set, candling (day 7 and 14), get ready (day 17), lockdown (day 18), pipping, **expected hatch date** (day 21) and pull-out day - all dates worked out by code from the set date |
+| **Egg selection** | Checks the eggs before setting: weight, days and temperature in storage, pointed end down, cracked, dirty or washed eggs, hens per cock, hens' age |
+| **Incubator check** | Checks temperature, humidity and turning for that day (the targets change at lockdown) and the incubator type (fan or still-air) |
+| **Hatch analysis** | From the opened eggs (clear, early, mid, late dead, pipped, weak chicks) works out fertility, hatch of fertile and hatch of set, finds the stage where most were lost and lists the likely causes |
+| **Learn & ask** | An AI hatchery teacher that answers any question from egg selection to hatching, using a 10-part guide and the farm's own egg sets and dates; the guide can also be read on the page |
+
+Code makes every judgement (each check is a rule with a number); Claude only explains the results and teaches.
+
 ### Ask the Manager anything
 
 The Manager answers any question from **all the agents' saved records**: *"How many birds died this week?"*, *"Tumepata faida ngapi mwezi huu?"*, *"How many eggs did B3 lay yesterday?"*, *"Which batch is making the most money?"*. Jac code first works out every number (totals for today, yesterday, the last 7 days, this month, last month and all time, per batch and for the farm; laying rate; feed conversion; profit), and Claude only picks the right figure and words the answer. If something has not been recorded, it says so instead of guessing.
@@ -396,7 +408,7 @@ Open **http://localhost:8000** — or skip the setup and use the [live demo](htt
 
 | Test | What it checks |
 |---|---|
-| Automated suite (220 checks, stand-in AI) | Every walker and calculation: reports, deaths and alive, feed store, hatchery, triage safety, sale blocking, profit statement, buyers, costs, chat sale completion, language choice, clean start, customer orders, supply orders, vet visits, shared costs, dates, and that every page's numbers add up |
+| Automated suite (237 checks, stand-in AI) | Every walker and calculation: reports, deaths and alive, feed store, hatchery, triage safety, sale blocking, profit statement, buyers, costs, chat sale completion, language choice, clean start, customer orders, supply orders, vet visits, shared costs, dates, and that every page's numbers add up |
 | `livetest/live_test.jac` (18 checks, real Claude) | Reading reports in English, Kiswahili and Sheng (e.g. 32 trays = 960 eggs), RED for twisted necks + rising deaths, no medicine names, correct routing to each agent, no wrong Kiswahili words |
 
 Run the live test: `cd livetest` then `jac run live_test.jac`.
