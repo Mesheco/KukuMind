@@ -806,8 +806,8 @@ def early_warnings(b: Batch) -> list[str] {
         avg_g = sum(per_bird) / len(per_bird);
         now_g = 1000.0 * last.feed_kg / last_flock;
         if now_g < 0.85 * avg_g {
-            drop = 100.0 * (avg_g - now_g) / avg_g;
-            out.append(f"Feed intake dropped {drop:.0f}% per bird ({now_g:.0f} g a bird on {last.date} vs {avg_g:.0f} g a bird on the days before).");
+            drop_pct = 100.0 * (avg_g - now_g) / avg_g;
+            out.append(f"Feed intake dropped {drop_pct:.0f}% per bird ({now_g:.0f} g a bird on {last.date} vs {avg_g:.0f} g a bird on the days before).");
         }
     }
 
@@ -1627,8 +1627,8 @@ walker kukumind {
         if self.force in ["report", "health", "advice", "hatchery", "feed", "sales", "briefing"] {
             # each agent's own chat also takes its own kind of booking:
             # Flock records -> new flocks, Sales -> customer orders and costs, Feed -> supply orders, Disease detector -> vet visits
-            own = {"report": ["new_batch"], "sales": ["order", "expense"], "feed": ["supply"], "health": ["vet_visit"]};
-            if r.intent not in own.get(self.force, []) { self.intent = self.force; }
+            agent_kinds = {"report": ["new_batch"], "sales": ["order", "expense"], "feed": ["supply"], "health": ["vet_visit"]};
+            if r.intent not in agent_kinds.get(self.force, []) { self.intent = self.force; }
         }
         if self.photo_path { self.intent = "health"; }     # a photo always means a health check
 
