@@ -7,7 +7,7 @@ kind = "fullstack"
 
 # Python packages the server needs (installed by `jac install` / JacHammer)
 [dependencies]
-byllm = ">=0.6.0"
+# byllm comes with the Jac runtime (JacHammer)
 
 [dependencies.npm]
 react = "^18.2.0"
