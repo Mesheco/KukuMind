@@ -4,7 +4,7 @@ Used by main.jac (web app, `jac start main.jac`) and demo.jac (terminal demo, `j
 
 import os;
 import math;
-import from byllm.lib { Model, Image }
+import importlib; def load_byllm() -> any { try { return importlib.import_module("jaclang.byllm.lib"); } except ImportError as err { return importlib.import_module("byllm.lib"); } } glob BYLLM = load_byllm(); glob Model = BYLLM.Model; glob Image = BYLLM.Image;
 glob llm = Model(model_name="claude-haiku-4-5-20251001");      # reads messages and numbers (fast, cheap)
 
 # Model that WRITES replies to farmers. For better Kiswahili, change it to "claude-sonnet-4-6",
