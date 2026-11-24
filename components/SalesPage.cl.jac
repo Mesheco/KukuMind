@@ -86,6 +86,10 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
     if item == "eggs" { each = parseFloat(tray_price or "0") / 30.0; }
     total = (n_eggs if item == "eggs" else int(parseFloat(qty or "0"))) * each;
     total_costs = sum([c.amount for c in farm.cost_lines]);
+    # money out = cash actually spent: feed BOUGHT + chicks, vaccines, labour... (profit still counts only the feed the birds ATE)
+    cash_out = farm.feed_bought_cost + farm.other_costs;
+    cash_left = farm.income - cash_out;
+    feed_stock_value = farm.feed_kg * farm.feed_price;
     margin = int(farm.balance * 100 / farm.income) if farm.income > 0 else 0;
 
     async def save() {
@@ -198,7 +202,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
             <AgentHead icon={a["icon"]} name={a["name"] + " agent"} job={a["job"]} />
             <div className="km-grid4" style={{"marginBottom": "1rem"}}>
                 <Stat label="Sales (money in)" value={"KSh " + money(farm.income)} note={"birds " + money(farm.bird_income) + " · eggs " + money(farm.egg_income)} />
-                <Stat label="Costs (money out)" value={"KSh " + money(total_costs)} note={"feed " + money(farm.feed_eaten_cost) + " · other " + money(farm.other_costs)} />
+                <Stat label="Money out (spent)" value={"KSh " + money(cash_out)} note={"feed bought " + money(farm.feed_bought_cost) + " · chicks & other " + money(farm.other_costs)} />
                 <Stat label="Profit" value={"KSh " + money(farm.balance)} note={str(margin) + "% of sales" if farm.income > 0 else "no sales yet"}
                       colour={"#4ade80" if farm.balance >= 0 else "#f87171"} />
                 <Stat label="Sold" value={money(float(farm.sold_total)) + " birds"} note={money(float(farm.eggs_sold)) + " eggs"} />
@@ -396,18 +400,25 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                                 <Row label="Bird sales" value={"KSh " + money(farm.bird_income)} />
                                 <Row label="Egg sales" value={"KSh " + money(farm.egg_income)} />
                                 <Row label="Total sales" value={"KSh " + money(farm.income)} bold={True} />
-                                <div style={{"fontWeight": "700", "fontSize": "0.85rem", "marginTop": "0.7rem", "color": "#f87171"}}>MONEY OUT</div>
+                                <div style={{"fontWeight": "700", "fontSize": "0.85rem", "marginTop": "0.7rem", "color": "#f87171"}}>MONEY OUT - what you spent</div>
+                                <Row label="Feed bought (all deliveries with a price)" value={"- KSh " + money(farm.feed_bought_cost)} />
                                 {for c in farm.cost_lines {
-                                    <Row key={c.kind} label={c.kind + (" (" + dec(farm.feed_eaten_kg, 2) + " kg x KSh " + dec(farm.feed_price, 2) + " per kg)" if c.kind == "Feed eaten" else "")}
-                                         value={"- KSh " + money(c.amount)} />
+                                    if c.kind != "Feed eaten" {
+                                        <Row key={c.kind} label={c.kind} value={"- KSh " + money(c.amount)} />
+                                    }
                                 }}
-                                <Row label="Total costs" value={"- KSh " + money(total_costs)} bold={True} />
+                                <Row label="Total money out" value={"- KSh " + money(cash_out)} bold={True} />
+                                <Row label="Money in minus money out" value={"KSh " + money(cash_left)} bold={True} colour={"#4ade80" if cash_left >= 0 else "#f87171"} />
+                                <div style={{"fontWeight": "700", "fontSize": "0.85rem", "marginTop": "0.9rem", "color": "#f2b84b"}}>PROFIT - counts only the feed the birds have eaten</div>
+                                <Row label="Total sales" value={"KSh " + money(farm.income)} />
+                                <Row label={"Feed eaten (" + dec(farm.feed_eaten_kg, 2) + " kg x KSh " + dec(farm.feed_price, 2) + " per kg)"} value={"- KSh " + money(farm.feed_eaten_cost)} />
+                                <Row label="Chicks and other costs" value={"- KSh " + money(farm.other_costs)} />
                                 <div style={{"borderTop": "2px solid #e6edf7", "marginTop": "0.5rem", "paddingTop": "0.3rem"}}>
                                     <Row label={"PROFIT" + (" (" + str(margin) + "% of sales)" if farm.income > 0 else "")} value={"KSh " + money(farm.balance)}
                                          bold={True} colour={"#4ade80" if farm.balance >= 0 else "#f87171"} />
                                 </div>
                                 <div className="km-small" style={{"marginTop": "0.5rem"}}>
-                                    Feed is counted when the birds eat it (from the daily reports), not when it is bought. Add chick, vaccine and labour costs below so the profit is complete.
+                                    &quot;Money out&quot; is cash you spent, including feed you have bought but the birds have not eaten yet (about KSh {money(feed_stock_value)} of feed is still in the store). Profit counts feed only as the birds eat it (from the daily reports), so unused feed is not a loss. Add chick, vaccine and labour costs below so the profit is complete.
                                 </div>
                             </div>
 
