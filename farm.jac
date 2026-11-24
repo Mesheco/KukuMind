@@ -258,15 +258,19 @@ walker build_demo_farm {
             catch_up([here -->[?:Farm]][0]);       # move ages forward to today's date
             disengage;
         }
-        farm = here ++> Farm(name="Meshack Poultry Farm", owner="Meshack", phone="0722434939", last_tick=today());
-        f = farm[0];
+        # (`a ++> b` gives a list on older Jac and the node itself on newer Jac, so the nodes are looked up instead)
+        here ++> Farm(name="Meshack Poultry Farm", owner="Meshack", phone="0722434939", last_tick=today());
+        f = [here -->[?:Farm]][0];
 
-        h1 = f ++> House(name="House A", capacity=2000);
-        h2 = f ++> House(name="House B", capacity=1500);
+        f ++> House(name="House A", capacity=2000);
+        f ++> House(name="House B", capacity=1500);
+        houses = [f -->[?:House]];
+        h1 = houses[0];
+        h2 = houses[1];
 
-        h1[0] ++> Batch(batch_id="B1", bird_type="broiler", start_count=1000, alive=1000, age_days=10);
-        h1[0] ++> Batch(batch_id="B2", bird_type="broiler", start_count=800, alive=800, age_days=35);
-        h2[0] ++> Batch(batch_id="B3", bird_type="layer", start_count=1200, alive=1200, age_days=150);
+        h1 ++> Batch(batch_id="B1", bird_type="broiler", start_count=1000, alive=1000, age_days=10);
+        h1 ++> Batch(batch_id="B2", bird_type="broiler", start_count=800, alive=800, age_days=35);
+        h2 ++> Batch(batch_id="B3", bird_type="layer", start_count=1200, alive=1200, age_days=150);
 
         f ++> FeedStore(stock_kg=2500.0);
         f ++> Buyer(name="Mama Njeri Hotel", phone="0712000001", wants="broilers");
@@ -522,7 +526,8 @@ walker set_eggs {
         }
         day = max(0, self.day);
         set_on = (date.fromisoformat(today()) - timedelta(days=day)).isoformat();
-        e = (f ++> EggSet(set_id=self.set_id, bird_type=self.bird_type, eggs_set=self.eggs, day=day, set_date=set_on))[0];
+        f ++> EggSet(set_id=self.set_id, bird_type=self.bird_type, eggs_set=self.eggs, day=day, set_date=set_on);
+        e = [x for x in [f -->[?:EggSet]] if x.set_id == self.set_id][-1];
         self.note = (f"Egg set {self.set_id} saved: {self.eggs} {self.bird_type} eggs, set on {nice_long(set_on)} (day {day}). "
                      + f"Candling: {nice_long(egg_date(e, 7))} and {nice_long(egg_date(e, 14))}. Lockdown: {nice_long(egg_date(e, 18))}. "
                      + f"Expected hatch: {nice_long(egg_date(e, INCUBATION_DAYS))}.");
@@ -3244,8 +3249,9 @@ walker:pub setup_farm {
             report farm_view([here -->[?:Farm]][0]);
             disengage;
         }
-        f = (here ++> Farm(name=self.name.strip() or "My Poultry Farm", owner=self.owner.strip() or "Farmer", last_tick=today(),
-                          phone=self.phone.strip()))[0];
+        here ++> Farm(name=self.name.strip() or "My Poultry Farm", owner=self.owner.strip() or "Farmer", last_tick=today(),
+                      phone=self.phone.strip());
+        f = [here -->[?:Farm]][0];
         names = [h.strip() for h in self.houses.split(",") if h.strip() != ""];
         if len(names) == 0 { names = ["House A"]; }
         for h in names { f ++> House(name=h, capacity=5000); }
@@ -3789,8 +3795,9 @@ walker book_vet {
             disengage;
         }
         self.visit_id = next_ref("V", [v.visit_id for v in farm_visits(f)]);
-        v = (f ++> VetVisit(visit_id=self.visit_id, date=d, visit_date=self.visit_date,
-                            batch_id="" if self.batch_id == "all" else self.batch_id, reason=self.reason.strip()))[0];
+        f ++> VetVisit(visit_id=self.visit_id, date=d, visit_date=self.visit_date,
+                       batch_id="" if self.batch_id == "all" else self.batch_id, reason=self.reason.strip());
+        v = [x for x in farm_visits(f) if x.visit_id == self.visit_id][-1];
         vet = farm_vet(f);
         self.vet_message = vet_visit_message(f, v);
         self.vet_link = whatsapp_link(vet.phone, self.vet_message) if vet.phone else "";
