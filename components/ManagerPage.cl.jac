@@ -23,8 +23,12 @@ def:pub ManagerPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None
     async def get_brief(lang: str) {
         writing = True;
         brief_lang = lang;
-        res = root spawn briefing(language=lang);
-        if res.reports and len(res.reports) > 0 { brief = res.reports[0].reply; }
+        try {
+            res = root spawn briefing(language=lang);
+            if res.reports and len(res.reports) > 0 { brief = res.reports[0].reply; }
+        } except Exception as e {
+            brief = "Samahani - the briefing did not load. Please try again.";
+        }
         writing = False;
     }
     async def go_next_day() {

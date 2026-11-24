@@ -36,6 +36,7 @@ def:pub HealthPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None]
     has looking: bool = False;
     has copied: bool = False;
     has problem: str = "";
+    has ask_problem: str = "";
 
     a = agent_info("health");
     chosen = batch_id if batch_id != "" else (farm.batches[0].batch_id if len(farm.batches) > 0 else "");
@@ -59,10 +60,18 @@ def:pub HealthPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None]
         checking = True;
         result = None;
         copied = False;
-        res = root spawn diagnose(batch_id=chosen, description=text, photo=photo, language=lang);
-        d = res.reports[0];
-        result = d;
-        if d.farm { onFarm(d.farm); }
+        try {
+            res = root spawn diagnose(batch_id=chosen, description=text, photo=photo, language=lang);
+            if len(res.reports) > 0 {
+                d = res.reports[0];
+                result = d;
+                if d.farm { onFarm(d.farm); }
+            } else {
+                problem = "The check did not give an answer. Please try again.";
+            }
+        } except Exception as e {
+            problem = "Samahani - the check did not work. Please try again.";
+        }
         checking = False;
     }
     def check_click(e: MouseEvent) { run_check(); }
@@ -72,8 +81,17 @@ def:pub HealthPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None]
         question = q;
         looking = True;
         info = None;
-        res = root spawn research(question=q, language=lang);
-        info = res.reports[0];
+        ask_problem = "";
+        try {
+            res = root spawn research(question=q, language=lang);
+            if len(res.reports) > 0 {
+                info = res.reports[0];
+            } else {
+                ask_problem = "No answer came back. Please try again.";
+            }
+        } except Exception as e {
+            ask_problem = "Samahani - the research did not work. Please try again.";
+        }
         looking = False;
     }
     def ask_click(e: MouseEvent) { ask(question); }
@@ -260,6 +278,7 @@ def:pub HealthPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None]
                                 </div>
                             </div>
                             {if looking { <div className="km-card km-muted">Looking it up...</div> }}
+                            {if ask_problem != "" { <div className="km-notice">{ask_problem}</div> }}
                             {if info is not None {
                                 <div className="km-card">
                                     <div style={{"display": "flex", "alignItems": "center", "gap": "0.5rem", "flexWrap": "wrap"}}>

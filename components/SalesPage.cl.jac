@@ -7,19 +7,19 @@ import from .Charts { BarChart, HBars, money, dec }
 import from .FarmPanel { Row }
 import from .Bookings { OrdersCard }
 
-sv import from ..farm { FarmView, BuyerMessages, SaleView, sell, buyer_offers, add_expense }
+sv import from ..farm { FarmView, BuyerMessages, SaleView, sell, buyer_offers, add_expense, sale_edit, sale_delete, buyer_save }
 
 # KSh 450, KSh 13.67 - prices shown to the cent so quantity x price = total
 def price_text(p: float) -> str {
     return "KSh " + dec(p, 2);
 }
 
-def:pub SalesTable(sales: list[SaleView], limit: int) -> JsxElement {
+def:pub SalesTable(sales: list[SaleView], limit: int, onEdit: Callable[[SaleView], None], onDelete: Callable[[SaleView], None]) -> JsxElement {
     rows = sales[:limit] if limit > 0 else sales;
     return
         <div style={{"overflowX": "auto"}}>
             <table className="km-table">
-                <thead><tr><th>Date</th><th>Batch</th><th>Buyer</th><th>Sold</th><th>Price</th><th>Total</th></tr></thead>
+                <thead><tr><th>Date</th><th>Batch</th><th>Buyer</th><th>Sold</th><th>Price</th><th>Total</th><th></th></tr></thead>
                 <tbody>
                     {for (i, x) in enumerate(rows) {
                         <tr key={str(i)}>
@@ -27,6 +27,10 @@ def:pub SalesTable(sales: list[SaleView], limit: int) -> JsxElement {
                             <td>{(str(int(x.qty / 30)) + " trays (" + str(x.qty) + " eggs)") if x.item == "eggs" and x.qty % 30 == 0 else str(x.qty) + " " + x.item}</td>
                             <td>{(price_text(x.price_each * 30) + " / tray") if x.item == "eggs" and x.qty % 30 == 0 else price_text(x.price_each)}</td>
                             <td><strong>{"KSh " + money(x.total)}</strong></td>
+                            <td style={{"whiteSpace": "nowrap"}}>
+                                <button className="km-btn" style={{"padding": "0.2rem 0.6rem", "marginRight": "0.3rem"}} onClick={lambda(e: MouseEvent) { onEdit(x); }}>✏ Edit</button>
+                                <button className="km-btn" style={{"padding": "0.2rem 0.6rem"}} onClick={lambda(e: MouseEvent) { onDelete(x); }}>🗑 Delete</button>
+                            </td>
                         </tr>
                     }}
                 </tbody>
@@ -56,6 +60,21 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
     has cost_note: str = "";
     has cost_msg: str = "";
     has cost_ok: bool = True;
+    has edit_ref: str = "";
+    has edit_item: str = "birds";
+    has edit_qty: str = "";
+    has edit_trays: str = "";
+    has edit_price: str = "";
+    has edit_tray_price: str = "";
+    has edit_buyer: str = "";
+    has edit_msg: str = "";
+    has edit_ok: bool = True;
+    has edit_saving: bool = False;
+    has b_name: str = "";
+    has b_phone: str = "";
+    has b_wants: str = "";
+    has b_msg: str = "";
+    has b_ok: bool = True;
 
     a = agent_info("sales");
     ss = farm.sales_summary;
@@ -93,10 +112,82 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
     }
     def submit_cost(e: FormEvent) { e.preventDefault(); save_cost(); }
 
+    def start_edit(x: SaleView) {
+        edit_ref = x.ref;
+        edit_item = x.item;
+        edit_buyer = x.buyer if x.buyer != "buyer not named" else "";
+        edit_msg = "";
+        if x.item == "eggs" {
+            edit_trays = str(int(x.qty / 30));
+            edit_qty = str(x.qty % 30);
+            edit_tray_price = dec(x.price_each * 30, 2);
+            edit_price = "";
+        } else {
+            edit_qty = str(x.qty);
+            edit_price = dec(x.price_each, 2);
+            edit_trays = "";
+            edit_tray_price = "";
+        }
+    }
+    def cancel_edit(e: MouseEvent) { edit_ref = ""; edit_msg = ""; }
+
+    async def save_edit() {
+        edit_saving = True;
+        try {
+            res = root spawn sale_edit(sale_ref=edit_ref, qty=int(parseFloat(edit_qty or "0")), trays=int(parseFloat(edit_trays or "0")),
+                                       price_each=parseFloat(edit_price or "0"), price_per_tray=parseFloat(edit_tray_price or "0"), buyer=edit_buyer);
+            r = res.reports[0];
+            edit_msg = r.message;
+            edit_ok = r.ok;
+            if r.farm { onFarm(r.farm); }
+            if r.ok { edit_ref = ""; }
+        } except Exception as e {
+            edit_msg = "Samahani - the change was not saved. Please try again.";
+            edit_ok = False;
+        }
+        edit_saving = False;
+    }
+    def submit_edit(e: FormEvent) { e.preventDefault(); save_edit(); }
+
+    async def delete_sale(x: SaleView) {
+        win: any = window;
+        if not win.confirm("Delete this sale (" + str(x.qty) + " " + x.item + " to " + x.buyer + ")? The birds or eggs go back into stock.") { return; }
+        try {
+            res = root spawn sale_delete(sale_ref=x.ref);
+            r = res.reports[0];
+            edit_msg = r.message;
+            edit_ok = r.ok;
+            if r.farm { onFarm(r.farm); }
+            edit_ref = "";
+        } except Exception as e {
+            edit_msg = "Samahani - the sale was not deleted. Please try again.";
+            edit_ok = False;
+        }
+    }
+
+    async def save_buyer() {
+        try {
+            res = root spawn buyer_save(name=b_name, phone=b_phone, wants=b_wants);
+            r = res.reports[0];
+            b_msg = r.message;
+            b_ok = r.ok;
+            if r.farm { onFarm(r.farm); }
+            if r.ok { b_name = ""; b_phone = ""; b_wants = ""; }
+        } except Exception as e {
+            b_msg = "Samahani - the buyer was not saved. Please try again.";
+            b_ok = False;
+        }
+    }
+    def submit_buyer(e: FormEvent) { e.preventDefault(); save_buyer(); }
+
     async def write_offers(e: MouseEvent) {
         writing = True;
-        res = root spawn buyer_offers(language=lang);
-        offers = res.reports[0];
+        try {
+            res = root spawn buyer_offers(language=lang);
+            if len(res.reports) > 0 { offers = res.reports[0]; }
+        } except Exception as e {
+            print("buyer_offers failed");
+        }
         writing = False;
     }
     def pick_tab(t: str) { tab = t; }
@@ -122,6 +213,31 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                         <Tab label="Profit & costs" current={tab} onPick={pick_tab} />
                         <Tab label="Sales history" current={tab} onPick={pick_tab} />
                     </div>
+
+                    {if edit_ref != "" {
+                        <form className="km-card" onSubmit={submit_edit} style={{"borderColor": "#f2b84b"}}>
+                            <h3>{"✏ Edit sale " + edit_ref}</h3>
+                            {if edit_item == "eggs" {
+                                <div className="km-grid4">
+                                    <Field label="Trays" value={edit_trays} onValue={lambda(v: str) { edit_trays = v; }} kind="number" />
+                                    <Field label="Loose eggs" value={edit_qty} onValue={lambda(v: str) { edit_qty = v; }} kind="number" />
+                                    <Field label="Price per tray (KSh)" value={edit_tray_price} onValue={lambda(v: str) { edit_tray_price = v; }} kind="number" />
+                                    <Field label="Buyer" value={edit_buyer} onValue={lambda(v: str) { edit_buyer = v; }} />
+                                </div>
+                            } else {
+                                <div className="km-grid4">
+                                    <Field label="Number of birds" value={edit_qty} onValue={lambda(v: str) { edit_qty = v; }} kind="number" />
+                                    <Field label="Price each (KSh)" value={edit_price} onValue={lambda(v: str) { edit_price = v; }} kind="number" />
+                                    <Field label="Buyer" value={edit_buyer} onValue={lambda(v: str) { edit_buyer = v; }} />
+                                </div>
+                            }}
+                            <div style={{"marginTop": "0.7rem"}}>
+                                <button type="submit" className="km-btn primary" disabled={edit_saving}>{"Saving..." if edit_saving else "Save changes"}</button>
+                                <button type="button" className="km-btn" style={{"marginLeft": "0.5rem"}} onClick={cancel_edit}>Cancel</button>
+                            </div>
+                        </form>
+                    }}
+                    <Notice text={edit_msg} ok={edit_ok} />
 
                     {if tab == "Sales report" {
                         <div>
@@ -202,7 +318,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                             </form>
                             <div className="km-card">
                                 <h3>Latest sales</h3>
-                                <SalesTable sales={farm.sales} limit={5} />
+                                <SalesTable sales={farm.sales} limit={5} onEdit={start_edit} onDelete={delete_sale} />
                             </div>
                         </div>
                     }}
@@ -235,6 +351,17 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                                     </table>
                                 </div>
                                 <div className="km-small" style={{"marginTop": "0.4rem"}}>A new buyer named in a sale is added here automatically.</div>
+                                <form onSubmit={submit_buyer} style={{"marginTop": "0.8rem"}}>
+                                    <strong>Add a buyer or fix a WhatsApp number</strong>
+                                    <div className="km-grid3">
+                                        <Field label="Buyer name" value={b_name} onValue={lambda(v: str) { b_name = v; }} hint="e.g. Mama Njeri Hotel" />
+                                        <Field label="WhatsApp number" value={b_phone} onValue={lambda(v: str) { b_phone = v; }} hint="0712345678 or +256771234567" />
+                                        <Field label="Wants (optional)" value={b_wants} onValue={lambda(v: str) { b_wants = v; }} hint="broilers, eggs" />
+                                    </div>
+                                    <button type="submit" className="km-btn">Save buyer</button>
+                                    <Notice text={b_msg} ok={b_ok} />
+                                    <div className="km-small">Offers open in your own WhatsApp with the message ready; you press Send. Use the buyer's real number - the sample buyers have made-up numbers.</div>
+                                </form>
                                 <button className="km-btn primary" style={{"marginTop": "0.7rem"}} onClick={write_offers} disabled={writing}>
                                     {"Writing messages..." if writing else "✍ Write WhatsApp offers to buyers (" + (lang if lang != "Auto" else "English") + ")"}
                                 </button>
@@ -256,7 +383,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                             }}
                             <div className="km-card">
                                 <h3>Sales made</h3>
-                                <SalesTable sales={farm.sales} limit={10} />
+                                <SalesTable sales={farm.sales} limit={10} onEdit={start_edit} onDelete={delete_sale} />
                             </div>
                         </div>
                     }}
@@ -338,7 +465,7 @@ def:pub SalesPage(lang: str, farm: FarmView, onFarm: Callable[[FarmView], None],
                     {if tab == "Sales history" {
                         <div className="km-card">
                             <h3>All sales</h3>
-                            <SalesTable sales={farm.sales} limit={0} />
+                            <SalesTable sales={farm.sales} limit={0} onEdit={start_edit} onDelete={delete_sale} />
                             {if len(farm.sales) > 0 {
                                 <div style={{"marginTop": "0.6rem"}}>
                                     <Row label={str(len(farm.sales)) + " sales"} value={"KSh " + money(farm.income)} bold={True} />
