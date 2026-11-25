@@ -4,7 +4,7 @@ Used by main.jac (web app, `jac start main.jac`) and demo.jac (terminal demo, `j
 
 import os;
 import math;
-import from byllm.lib { Model, Image }
+import importlib; def load_byllm() -> any { try { return importlib.import_module("jaclang.byllm.lib"); } except ImportError as err { return importlib.import_module("byllm.lib"); } } glob BYLLM = load_byllm(); glob Model = BYLLM.Model; glob Image = BYLLM.Image;
 glob llm = Model(model_name="claude-haiku-4-5-20251001");      # reads messages and numbers (fast, cheap)
 
 # Model that WRITES replies to farmers. For better Kiswahili, change it to "claude-sonnet-4-6",
@@ -145,6 +145,23 @@ node Farm {
     has owner: str;
     has phone: str = "";     # the owner's phone
     has last_tick: str = ""; # last date the bird ages / incubator days were moved forward
+    has ai_day: str = "";    # the day the AI message count below belongs to
+    has ai_count: int = 0;   # AI messages used today (each farmer has a daily limit, so one person cannot use up the budget)
+}
+
+# Daily limit of AI messages for each farmer (change it with the AI_DAILY_LIMIT setting in JacHammer, default 40)
+glob AI_DAILY_LIMIT = int(os.environ.get("AI_DAILY_LIMIT", "40") or "40");
+glob QUOTA_MSG = f"You have used today's {AI_DAILY_LIMIT} AI messages. They start again tomorrow. Everything else in KukuMind (reports, sales, feed, orders) still works.";
+
+def ai_quota_ok(f: Farm) -> bool {
+    t = today();
+    if f.ai_day != t {
+        f.ai_day = t;
+        f.ai_count = 0;
+    }
+    if f.ai_count >= AI_DAILY_LIMIT { return False; }
+    f.ai_count += 1;
+    return True;
 }
 
 # Bird ages and incubator days follow the real calendar: every time the farm is opened,
@@ -258,15 +275,19 @@ walker build_demo_farm {
             catch_up([here -->[?:Farm]][0]);       # move ages forward to today's date
             disengage;
         }
-        farm = here ++> Farm(name="Meshack Poultry Farm", owner="Meshack", phone="0722434939", last_tick=today());
-        f = farm[0];
+        # (`a ++> b` gives a list on older Jac and the node itself on newer Jac, so the nodes are looked up instead)
+        here ++> Farm(name="Meshack Poultry Farm", owner="Meshack", phone="0722434939", last_tick=today());
+        f = [here -->[?:Farm]][0];
 
-        h1 = f ++> House(name="House A", capacity=2000);
-        h2 = f ++> House(name="House B", capacity=1500);
+        f ++> House(name="House A", capacity=2000);
+        f ++> House(name="House B", capacity=1500);
+        houses = [f -->[?:House]];
+        h1 = houses[0];
+        h2 = houses[1];
 
-        h1[0] ++> Batch(batch_id="B1", bird_type="broiler", start_count=1000, alive=1000, age_days=10);
-        h1[0] ++> Batch(batch_id="B2", bird_type="broiler", start_count=800, alive=800, age_days=35);
-        h2[0] ++> Batch(batch_id="B3", bird_type="layer", start_count=1200, alive=1200, age_days=150);
+        h1 ++> Batch(batch_id="B1", bird_type="broiler", start_count=1000, alive=1000, age_days=10);
+        h1 ++> Batch(batch_id="B2", bird_type="broiler", start_count=800, alive=800, age_days=35);
+        h2 ++> Batch(batch_id="B3", bird_type="layer", start_count=1200, alive=1200, age_days=150);
 
         f ++> FeedStore(stock_kg=2500.0);
         f ++> Buyer(name="Mama Njeri Hotel", phone="0712000001", wants="broilers");
@@ -522,7 +543,8 @@ walker set_eggs {
         }
         day = max(0, self.day);
         set_on = (date.fromisoformat(today()) - timedelta(days=day)).isoformat();
-        e = (f ++> EggSet(set_id=self.set_id, bird_type=self.bird_type, eggs_set=self.eggs, day=day, set_date=set_on))[0];
+        f ++> EggSet(set_id=self.set_id, bird_type=self.bird_type, eggs_set=self.eggs, day=day, set_date=set_on);
+        e = [x for x in [f -->[?:EggSet]] if x.set_id == self.set_id][-1];
         self.note = (f"Egg set {self.set_id} saved: {self.eggs} {self.bird_type} eggs, set on {nice_long(set_on)} (day {day}). "
                      + f"Candling: {nice_long(egg_date(e, 7))} and {nice_long(egg_date(e, 14))}. Lockdown: {nice_long(egg_date(e, 18))}. "
                      + f"Expected hatch: {nice_long(egg_date(e, INCUBATION_DAYS))}.");
@@ -1600,6 +1622,32 @@ walker morning_briefing {
     }
 }
 
+# A message that saves something (a cost, an order, a supply, a new flock) must contain a number.
+# "Habari ya shamba leo?" has none, so it is a question, never a record (the AI router sometimes mixes them up).
+glob NUMBER_WORDS = ["moja", "mbili", "tatu", "nne", "tano", "sita", "saba", "nane", "tisa", "kumi", "ishirini", "thelathini",
+                     "arobaini", "hamsini", "mia", "elfu", "laki", "gunia", "tray", "trei", "one", "two", "three", "four", "five", "six",
+                     "seven", "eight", "nine", "ten", "twenty", "thirty", "forty", "fifty", "hundred", "thousand", "dozen", "half"];
+glob BRIEFING_WORDS = ["habari ya shamba", "hali ya shamba", "shamba leo", "farm today", "morning report", "morning briefing", "daily briefing", "ripoti ya leo", "how is the farm", "how's the farm"];
+
+glob QUESTION_STARTS = ["how", "what", "when", "which", "where", "why", "who", "is ", "are ", "do ", "does ", "can ", "tell me", "show me", "give me",
+                        "je ", "nini", "ngapi", "lini", "gani", "wapi", "nani", "habari", "hali ya", "niambie", "naomba", "nionyeshe", "kuna ", "ni ", "unaweza"];
+
+# True when the message is asking something rather than reporting something
+def looks_like_question(text: str) -> bool {
+    low = text.strip().lower();
+    if low.endswith("?") { return True; }
+    hit: bool = len([w for w in QUESTION_STARTS if low.startswith(w)]) > 0;
+    return hit;
+}
+
+def has_figures(text: str) -> bool {
+    low = text.lower();
+    if len([c for c in low if c.isdigit()]) > 0 { return True; }
+    words = low.replace("?", " ").replace(",", " ").replace(".", " ").split();
+    hit: bool = len([w for w in NUMBER_WORDS if w in words]) > 0;
+    return hit;
+}
+
 # ---------- WALKER: KukuMind front door - send ANY message here ----------
 walker kukumind {
     has text: str;
@@ -1620,8 +1668,14 @@ walker kukumind {
         r = route_message(self.text, batch_ids, LANGUAGE_GUIDE);
         r.language = reply_lang(self.language, r.language);
         self.intent = r.intent;
+        low_text = self.text.lower();
+        if self.force == "" and any([w in low_text for w in BRIEFING_WORDS]) and not has_figures(self.text) {
+            self.intent = "briefing";
+        } elif self.intent in ["expense", "order", "supply", "new_batch", "vet_visit"] and (not has_figures(self.text) or looks_like_question(self.text)) and self.force == "" {
+            self.intent = "question";
+        }
         # a short answer to "which batch / what price?" finishes the sale that was waiting
-        if len([here -->[?:Farm] -->[?:PendingSale]]) > 0 and len(self.text) <= 60 and self.force in ["", "sales"] {
+        if len([here -->[?:Farm] -->[?:PendingSale]]) > 0 and len(self.text) <= 60 and has_figures(self.text) and self.force in ["", "sales"] {
             self.intent = "sales";
         }
         if self.force in ["report", "health", "advice", "hatchery", "feed", "sales", "briefing"] {
@@ -1767,7 +1821,7 @@ walker kukumind {
         # A short answer ("B3", "kwa 420") completes a sale message that was missing details
         pending = [f -->[?:PendingSale]];
         text = self.text;
-        if len(pending) > 0 and len(self.text) <= 60 {
+        if len(pending) > 0 and len(self.text) <= 60 and has_figures(self.text) {
             text = pending[0].text + ". " + self.text;
         }
         for p in pending { del p; }
@@ -1969,6 +2023,12 @@ walker kukumind {
         pe = parse_expense(self.text, EXPENSE_KINDS, [b.batch_id for b in farm_batches(f)], LANGUAGE_GUIDE);
         lang = reply_lang(self.language, pe.language or language);
         if pe.amount_ksh <= 0 {
+            if not has_figures(self.text) or looks_like_question(self.text) {
+                # not a cost at all - the router guessed wrong, so answer it as a question from the farm records
+                self.intent = "question";
+                self.reply = plain_text(manager_answer(self.text, farm_facts(f), lang, LANGUAGE_GUIDE));
+                return;
+            }
             self.reply = plain_text(ask_sale_details(["how much was paid (KSh)"], lang, LANGUAGE_GUIDE));
             return;
         }
@@ -2089,6 +2149,7 @@ obj FarmView {
     has feed_eaten_cost: float = 0.0;
     has balance: float = 0.0;          # all sales - all feed eaten
     has feed_price: float = 0.0;
+    has feed_bought_cost: float = 0.0;   # money spent buying feed (every delivery with a price)
     # ---- data for the agents' own pages ----
     has houses: list[str] = [];
     has tasks: list[str] = [];
@@ -2265,6 +2326,7 @@ obj SaleView {
     has qty: int;
     has price_each: float;
     has total: float;
+    has ref: str = "";       # which sale this is (batch id and its number), used to edit or delete it
 }
 
 obj BuyerView {
@@ -2295,6 +2357,14 @@ def r0(x: float) -> float {
 
 def today() -> str {
     return date.today().isoformat();
+}
+
+# A short, safe description of an AI error to show next to "could not be reached" (keys are hidden)
+def short_error(e: Exception) -> str {
+    import re;
+    msg: str = str(e).replace("\n", " ");
+    msg = re.sub(r"sk-[A-Za-z0-9_\-]+", "sk-...", msg);
+    return type(e).__name__ + ": " + msg[:220];
 }
 
 # Save a photo sent by the browser (a "data:image/...;base64,..." string) to a temporary file
@@ -2414,6 +2484,7 @@ def farm_view(f: Farm) -> FarmView {
                     expenses=expense_views(f),
                     expense_kinds=EXPENSE_KINDS,
                     feed_price=r2(price),
+                    feed_bought_cost=r0(sum([d.cost_ksh for d in [f -->[?:FeedStore] -->[?:FeedDelivery]]])),
                     houses=[h.name for h in [f -->[?:House]]],
                     tasks=booking_tasks(f) + (root spawn today_tasks(quiet=True)).tasks,
                     booking_tasks=booking_tasks(f),
@@ -2434,7 +2505,7 @@ def farm_view(f: Farm) -> FarmView {
 }
 
 # ---------- Send any message (and optional photo) to KukuMind ----------
-walker:pub chat {
+walker:protect chat {
     has text: str;
     has photo: str = "";
     has language: str = "";
@@ -2444,26 +2515,44 @@ walker:pub chat {
         here spawn build_demo_farm();
         path = save_photo(self.photo);
         msg = self.text.strip() or "Angalia picha hii ya kuku wangu";
-        k = here spawn kukumind(text=msg, date=today(), photo_path=path, language=self.language);
-        report ChatReply(intent=k.intent, level=k.level, reply=k.message,
-                         vet_message=k.vet_message, vet_link=k.vet_link);
+        try {
+            if not ai_quota_ok(farm_now()) {
+                report ChatReply(intent="system", level="", reply=QUOTA_MSG);
+                disengage;
+            }
+            k = here spawn kukumind(text=msg, date=today(), photo_path=path, language=self.language);
+            report ChatReply(intent=k.intent, level=k.level, reply=k.message,
+                             vet_message=k.vet_message, vet_link=k.vet_link);
+        } except Exception as e {
+            print(f"chat failed: {e}");
+            report ChatReply(intent="system", level="", reply="Samahani - the AI helper could not be reached just now. Your records are safe. Please try again in a minute. (Reason: " + short_error(e) + ")");
+        }
     }
 }
 
 # ---------- Morning briefing button ----------
-walker:pub briefing {
+walker:protect briefing {
     has language: str = "English";
     has reports: list[ChatReply] = [];
 
     can brief with Root entry {
         here spawn build_demo_farm();
-        mb = here spawn morning_briefing(language=self.language);
-        report ChatReply(intent="briefing", level="", reply=mb.reply);
+        try {
+            if not ai_quota_ok(farm_now()) {
+                report ChatReply(intent="briefing", level="", reply=QUOTA_MSG);
+                disengage;
+            }
+            mb = here spawn morning_briefing(language=self.language);
+            report ChatReply(intent="briefing", level="", reply=mb.reply);
+        } except Exception as e {
+            print(f"briefing failed: {e}");
+            report ChatReply(intent="briefing", level="", reply="Samahani - the AI helper could not be reached just now. Your records are safe. Please try again in a minute. (Reason: " + short_error(e) + ")");
+        }
     }
 }
 
 # ---------- Farm dashboard data ----------
-walker:pub farm_status {
+walker:protect farm_status {
     has reports: list[FarmView] = [];
 
     can show with Root entry {
@@ -2473,7 +2562,7 @@ walker:pub farm_status {
 }
 
 # ---------- Demo: move the farm forward one day ----------
-walker:pub next_day {
+walker:protect next_day {
     has reports: list[FarmView] = [];
 
     can tick with Root entry {
@@ -2484,7 +2573,7 @@ walker:pub next_day {
 }
 
 # ---------- Vet has visited and cleared a RED batch ----------
-walker:pub clear_batch {
+walker:protect clear_batch {
     has batch_id: str;
     has reports: list[FarmView] = [];
 
@@ -2510,7 +2599,7 @@ def wipe_farm() {
 }
 
 # ---------- Clear every record and start the farm again (same farm, houses, batches and buyers) ----------
-walker:pub start_fresh {
+walker:protect start_fresh {
     has reports: list[FarmView] = [];
 
     can reset with Root entry {
@@ -2589,9 +2678,11 @@ def feed_row(b: Batch) -> FeedRow {
 def sale_views(f: Farm) -> list[SaleView] {
     out: list[SaleView] = [];
     for b in farm_batches(f) {
-        for x in [b -->[?:Sale]] {
+        mine = [b -->[?:Sale]];
+        for i in range(len(mine)) {
+            x = mine[i];
             out.append(SaleView(date=x.date, batch_id=b.batch_id, buyer=x.buyer, item=x.item,
-                                qty=x.qty, price_each=x.price_each, total=x.total));
+                                qty=x.qty, price_each=x.price_each, total=x.total, ref=f"{b.batch_id}:{i}"));
         }
     }
     pairs = sorted([(out[i].date, i) for i in range(len(out))], reverse=True);
@@ -2659,6 +2750,21 @@ Vaccination by the normal schedule may be mentioned as prevention, without doses
 notifiable is True for Newcastle disease and avian influenza (bird flu)."""
 def research_disease(question: str, farm_info: str, language: str, triage_rules: str, language_guide: str) -> DiseaseInfo by writer();
 
+"""Same as research_disease, but run with the fast model (used when the writing model fails)."""
+def research_disease_lite(question: str, farm_info: str, language: str, triage_rules: str, language_guide: str) -> DiseaseInfo by llm();
+
+# Last resort when the AI cannot be reached: honest, safe, no medicine names
+def research_fallback(question: str) -> DiseaseInfo {
+    return DiseaseInfo(topic=question.strip()[:60] or "Disease research",
+        summary="The AI could not answer right now. Please try again in a minute.",
+        signs=["Birds that are dull, not eating, or standing apart", "Sudden deaths, twisted necks, green watery droppings, or swollen faces"],
+        spread="Disease spreads by sick birds, dirty boots, feed bags, water and visitors.",
+        prevention=["Keep the house clean and dry", "Keep visitors and other birds out", "Vaccinate by the normal schedule", "Remove dead birds quickly"],
+        notifiable=False,
+        call_vet_when="Call your vet if many birds are sick at once, or if birds die suddenly.",
+        farm_note="");
+}
+
 obj BuyerMessage {
     has buyer: str;
     has phone: str;
@@ -2677,7 +2783,7 @@ def farm_now() -> Farm {
 }
 
 # ---------- talk to ONE agent directly (from that agent's page) ----------
-walker:pub agent_chat {
+walker:protect agent_chat {
     has agent: str;
     has text: str;
     has photo: str = "";
@@ -2688,14 +2794,23 @@ walker:pub agent_chat {
         farm_now();
         path = save_photo(self.photo);
         msg = self.text.strip() or "Angalia picha hii ya kuku wangu";
-        k = here spawn kukumind(text=msg, date=today(), photo_path=path, force=self.agent, language=self.language);
-        report ChatReply(intent=k.intent, level=k.level, reply=clean_text(k.message),
-                         vet_message=k.vet_message, vet_link=k.vet_link);
+        try {
+            if not ai_quota_ok(farm_now()) {
+                report ChatReply(intent="system", level="", reply=QUOTA_MSG);
+                disengage;
+            }
+            k = here spawn kukumind(text=msg, date=today(), photo_path=path, force=self.agent, language=self.language);
+            report ChatReply(intent=k.intent, level=k.level, reply=clean_text(k.message),
+                             vet_message=k.vet_message, vet_link=k.vet_link);
+        } except Exception as e {
+            print(f"agent_chat failed: {e}");
+            report ChatReply(intent="system", level="", reply="Samahani - the AI helper could not be reached just now. Your records are safe. Please try again in a minute. (Reason: " + short_error(e) + ")");
+        }
     }
 }
 
 # ---------- FLOCK RECORDS: daily report form ----------
-walker:pub submit_report {
+walker:protect submit_report {
     has batch_id: str;
     has deaths: int = 0;
     has feed_kg: float = 0.0;
@@ -2735,7 +2850,7 @@ walker:pub submit_report {
 }
 
 # ---------- FLOCK RECORDS: register a new flock ----------
-walker:pub register_flock {
+walker:protect register_flock {
     has bird_type: str;
     has count: int;
     has house: str;
@@ -2763,7 +2878,7 @@ walker:pub register_flock {
 }
 
 # ---------- DISEASE DETECTOR: diagnose (camera photo and/or symptoms) ----------
-walker:pub diagnose {
+walker:protect diagnose {
     has batch_id: str;
     has description: str = "";
     has photo: str = "";
@@ -2779,8 +2894,18 @@ walker:pub diagnose {
         }
         path = save_photo(self.photo);
         desc = self.description.strip() or "Please look at this photo of my birds.";
-        h = here spawn health_check(batch_id=self.batch_id, description=desc, date=today(), photo_path=path,
-                                    language=self.language if self.language in ["English", "Kiswahili", "Sheng"] else "");
+        try {
+            if not ai_quota_ok(f) {
+                report Diagnosis(ok=False, batch_id=self.batch_id, level="", reply=QUOTA_MSG);
+                disengage;
+            }
+            h = here spawn health_check(batch_id=self.batch_id, description=desc, date=today(), photo_path=path,
+                                        language=self.language if self.language in ["English", "Kiswahili", "Sheng"] else "");
+        } except Exception as e {
+            print(f"diagnose failed: {e}");
+            report Diagnosis(ok=False, batch_id=self.batch_id, level="", reply="The health check could not reach the AI just now. If birds are dying or very sick, call your vet now. Otherwise try again in a minute.");
+            disengage;
+        }
         if h.result is None {
             report Diagnosis(ok=False, batch_id=self.batch_id, level="", reply="The health check did not work. Please try again.");
             disengage;
@@ -2795,16 +2920,34 @@ walker:pub diagnose {
 }
 
 # ---------- DISEASE DETECTOR: research a disease ----------
-walker:pub research {
+walker:protect research {
     has question: str;
     has language: str = "";
     has reports: list[DiseaseInfo] = [];
 
     can look with Root entry {
-        ensure_writer();
+        try { ensure_writer(); } except Exception as e0 { print(f"ensure_writer: {e0}"); }
         f = farm_now();
         info = "\n".join([batch_health_info(b) for b in farm_batches(f)]);
-        d = research_disease(self.question, info, self.language if self.language in ["English", "Kiswahili", "Sheng"] else "Auto", TRIAGE_RULES, LANGUAGE_GUIDE);
+        lang = self.language if self.language in ["English", "Kiswahili", "Sheng"] else "Auto";
+        d = None;
+        if not ai_quota_ok(f) {
+            qd = research_fallback(self.question);
+            qd.summary = QUOTA_MSG;
+            report qd;
+            disengage;
+        }
+        try {
+            d = research_disease(self.question, info, lang, TRIAGE_RULES, LANGUAGE_GUIDE);
+        } except Exception as e1 {
+            print(f"research (writer) failed: {e1}");
+            try {
+                d = research_disease_lite(self.question, info, lang, TRIAGE_RULES, LANGUAGE_GUIDE);
+            } except Exception as e2 {
+                print(f"research (lite) failed: {e2}");
+            }
+        }
+        if d is None { d = research_fallback(self.question); }
         d.summary = clean_text(plain_text(d.summary));
         d.signs = drop_drugs(d.signs);
         d.prevention = drop_drugs(d.prevention);
@@ -2815,7 +2958,7 @@ walker:pub research {
 }
 
 # ---------- HATCHERY: set eggs, candling, hatch ----------
-walker:pub hatchery_action {
+walker:protect hatchery_action {
     has action: str;              # "set", "candle", "hatch"
     has bird_type: str = "kienyeji";
     has eggs: int = 0;
@@ -2873,7 +3016,7 @@ walker:pub hatchery_action {
 }
 
 # ---------- FEED: a feed delivery arrived ----------
-walker:pub add_feed {
+walker:protect add_feed {
     has kg: float = 0.0;
     has bags: float = 0.0;
     has cost_ksh: float = 0.0;
@@ -2896,7 +3039,7 @@ walker:pub add_feed {
 }
 
 # ---------- SALES: record a sale from the form ----------
-walker:pub sell {
+walker:protect sell {
     has batch_id: str;
     has item: str;                # "birds" or "eggs"
     has qty: int = 0;
@@ -2927,14 +3070,130 @@ walker:pub sell {
     }
 }
 
+# ---------- SALES: correct or delete a sale that was saved wrongly ----------
+def sale_batch(f: Farm, ref: str) -> Batch | None {
+    parts = ref.split(":");
+    if len(parts) != 2 { return None; }
+    found = [b for b in farm_batches(f) if b.batch_id == parts[0]];
+    if len(found) == 0 { return None; }
+    return found[0];
+}
+
+def sale_node(f: Farm, ref: str) -> Sale | None {
+    b = sale_batch(f, ref);
+    if b is None { return None; }
+    try { idx = int(ref.split(":")[1]); } except Exception as e { return None; }
+    sales = [b -->[?:Sale]];
+    if idx < 0 or idx >= len(sales) { return None; }
+    return sales[idx];
+}
+
+walker:protect sale_edit {
+    has sale_ref: str;
+    has qty: int = 0;              # birds, or loose eggs
+    has trays: int = 0;            # eggs only
+    has price_each: float = 0.0;   # per bird
+    has price_per_tray: float = 0.0;
+    has buyer: str = "";
+    has reports: list[ActionResult] = [];
+
+    can change with Root entry {
+        f = farm_now();
+        b = sale_batch(f, self.sale_ref);
+        s = sale_node(f, self.sale_ref);
+        if s is None or b is None {
+            report ActionResult(ok=False, message="That sale was not found. Refresh the page and try again.", farm=farm_view(f));
+            disengage;
+        }
+        is_eggs = s.item == "eggs";
+        new_qty = self.trays * 30 + self.qty if is_eggs else self.qty;
+        price = self.price_each;
+        if is_eggs { price = self.price_per_tray / 30.0 if self.price_per_tray > 0 else self.price_each; }
+        if new_qty <= 0 or price <= 0 {
+            report ActionResult(ok=False, message="A sale needs a number above 0 and a price above 0. Nothing was changed.", farm=farm_view(f));
+            disengage;
+        }
+        if is_eggs {
+            if egg_counts_recorded(b) and new_qty > eggs_in_store(b) + s.qty {
+                report ActionResult(ok=False, message=f"Only {eggs_in_store(b) + s.qty} eggs from {b.batch_id} are in the records, so {new_qty} eggs cannot be sold. Nothing was changed.", farm=farm_view(f));
+                disengage;
+            }
+        } else {
+            room = b.alive + s.qty;
+            if new_qty > room {
+                report ActionResult(ok=False, message=f"Only {room} birds were available in {b.batch_id}, so {new_qty} cannot be sold. Nothing was changed.", farm=farm_view(f));
+                disengage;
+            }
+            b.alive = room - new_qty;
+        }
+        s.qty = new_qty;
+        s.price_each = price;
+        s.total = r0(new_qty * price);
+        if self.buyer.strip() != "" { s.buyer = find_or_add_buyer(f, self.buyer.strip(), s.item); }
+        report ActionResult(ok=True, message=f"Sale corrected: {new_qty} {s.item} to {s.buyer} = KSh {s.total:,.0f}. Profit and the sales report are updated.", farm=farm_view(f));
+    }
+}
+
+walker:protect sale_delete {
+    has sale_ref: str;
+    has reports: list[ActionResult] = [];
+
+    can remove with Root entry {
+        f = farm_now();
+        b = sale_batch(f, self.sale_ref);
+        s = sale_node(f, self.sale_ref);
+        if s is None or b is None {
+            report ActionResult(ok=False, message="That sale was not found. Refresh the page and try again.", farm=farm_view(f));
+            disengage;
+        }
+        what = f"{s.qty} {s.item} to {s.buyer}";
+        if s.item != "eggs" { b.alive += s.qty; }
+        del s;
+        report ActionResult(ok=True, message=f"Sale deleted: {what}. The birds or eggs are back in {b.batch_id}'s stock and the profit is updated.", farm=farm_view(f));
+    }
+}
+
+# ---------- SALES: add a buyer or change a buyer's WhatsApp number ----------
+walker:protect buyer_save {
+    has name: str;
+    has phone: str = "";
+    has wants: str = "";
+    has reports: list[ActionResult] = [];
+
+    can save with Root entry {
+        f = farm_now();
+        n = self.name.strip();
+        digits = "".join([c for c in self.phone if c.isdigit()]);
+        if n == "" {
+            report ActionResult(ok=False, message="Type the buyer's name.", farm=farm_view(f));
+            disengage;
+        }
+        if len(digits) < 9 {
+            report ActionResult(ok=False, message="Type the full WhatsApp number, e.g. 0712345678 or +256771234567.", farm=farm_view(f));
+            disengage;
+        }
+        phone = self.phone.strip();
+        old = [x for x in [f -->[?:Buyer]] if x.name.lower() == n.lower()];
+        if len(old) > 0 {
+            old[0].phone = phone;
+            if self.wants.strip() != "" { old[0].wants = self.wants.strip(); }
+            report ActionResult(ok=True, message=f"{old[0].name}'s number is now {phone}. Their WhatsApp offer will open to that number.", farm=farm_view(f));
+        } else {
+            f ++> Buyer(name=n, phone=phone, wants=self.wants.strip() or "birds and eggs");
+            report ActionResult(ok=True, message=f"Buyer {n} added with number {phone}.", farm=farm_view(f));
+        }
+    }
+}
+
 # ---------- SALES: write a WhatsApp message to every buyer ----------
-walker:pub buyer_offers {
+walker:protect buyer_offers {
     has language: str = "";
     has reports: list[BuyerMessages] = [];
 
     can write with Root entry {
-        ensure_writer();
+        try { ensure_writer(); } except Exception as e0 { print(f"ensure_writer: {e0}"); }
         f = farm_now();
+        use_ai = ai_quota_ok(f);
         ma = here spawn market_alerts(quiet=True, broadcast=False);
         out = BuyerMessages();
         if len(ma.offers) == 0 {
@@ -2944,7 +3203,13 @@ walker:pub buyer_offers {
             disengage;
         }
         for buyer in [f -->[?:Buyer]] {
-            m = plain_text(buyer_broadcast(f.name + (f" (call {f.owner} on {farm_phone(f)})" if farm_phone(f) else ""), buyer.name, buyer.wants, ma.offers, reply_lang(self.language, ""), LANGUAGE_GUIDE));
+            try {
+                if not use_ai { raise Exception("daily AI limit"); }
+                m = plain_text(buyer_broadcast(f.name + (f" (call {f.owner} on {farm_phone(f)})" if farm_phone(f) else ""), buyer.name, buyer.wants, ma.offers, reply_lang(self.language, ""), LANGUAGE_GUIDE));
+            } except Exception as e {
+                print(f"buyer_offers failed: {e}");
+                m = f"Hello {buyer.name}, this is {f.name}. We have for sale: " + "; ".join(ma.offers) + ". Please tell me what you need.";
+            }
             out.messages.append(BuyerMessage(buyer=buyer.name, phone=buyer.phone, message=m,
                                              link=whatsapp_link(buyer.phone, m)));
         }
@@ -2986,7 +3251,7 @@ def buyer_views(f: Farm) -> list[BuyerView] {
 }
 
 # ---------- SALES: record a cost (chicks, vaccines, labour...) ----------
-walker:pub add_expense {
+walker:protect add_expense {
     has batch_id: str;
     has kind: str;
     has amount: float = 0.0;
@@ -3017,7 +3282,7 @@ walker:pub add_expense {
 }
 
 # ---------- Reset: the demo farm, or an EMPTY farm with the farmer's own details ----------
-walker:pub setup_farm {
+walker:protect setup_farm {
     has mode: str = "demo";           # "demo" or "own"
     has name: str = "";
     has owner: str = "";
@@ -3035,8 +3300,9 @@ walker:pub setup_farm {
             report farm_view([here -->[?:Farm]][0]);
             disengage;
         }
-        f = (here ++> Farm(name=self.name.strip() or "My Poultry Farm", owner=self.owner.strip() or "Farmer", last_tick=today(),
-                          phone=self.phone.strip()))[0];
+        here ++> Farm(name=self.name.strip() or "My Poultry Farm", owner=self.owner.strip() or "Farmer", last_tick=today(),
+                      phone=self.phone.strip());
+        f = [here -->[?:Farm]][0];
         names = [h.strip() for h in self.houses.split(",") if h.strip() != ""];
         if len(names) == 0 { names = ["House A"]; }
         for h in names { f ++> House(name=h, capacity=5000); }
@@ -3580,8 +3846,9 @@ walker book_vet {
             disengage;
         }
         self.visit_id = next_ref("V", [v.visit_id for v in farm_visits(f)]);
-        v = (f ++> VetVisit(visit_id=self.visit_id, date=d, visit_date=self.visit_date,
-                            batch_id="" if self.batch_id == "all" else self.batch_id, reason=self.reason.strip()))[0];
+        f ++> VetVisit(visit_id=self.visit_id, date=d, visit_date=self.visit_date,
+                       batch_id="" if self.batch_id == "all" else self.batch_id, reason=self.reason.strip());
+        v = [x for x in farm_visits(f) if x.visit_id == self.visit_id][-1];
         vet = farm_vet(f);
         self.vet_message = vet_visit_message(f, v);
         self.vet_link = whatsapp_link(vet.phone, self.vet_message) if vet.phone else "";
@@ -3842,7 +4109,7 @@ def visit_views(f: Farm) -> list[VetVisitView] {
 # =====================================================================
 # WEB API for orders & bookings (forms and buttons on the agents' pages)
 # =====================================================================
-walker:pub order_add {
+walker:protect order_add {
     has buyer: str = "";
     has item: str = "birds";        # "birds" or "eggs"
     has bird_type: str = "broiler";
@@ -3867,7 +4134,7 @@ walker:pub order_add {
     }
 }
 
-walker:pub order_deliver {
+walker:protect order_deliver {
     has order_id: str;
     has qty: int = 0;
     has price_each: float = 0.0;     # per bird (0 = as agreed)
@@ -3882,7 +4149,7 @@ walker:pub order_deliver {
     }
 }
 
-walker:pub supply_add {
+walker:protect supply_add {
     has kind: str = "Feed";
     has qty: float = 0.0;            # kg (feed), chicks, or units
     has bags: float = 0.0;           # feed bags of 50 kg
@@ -3905,7 +4172,7 @@ walker:pub supply_add {
     }
 }
 
-walker:pub supply_receive {
+walker:protect supply_receive {
     has supply_id: str;
     has reports: list[ActionResult] = [];
 
@@ -3916,7 +4183,7 @@ walker:pub supply_receive {
     }
 }
 
-walker:pub vet_book {
+walker:protect vet_book {
     has batch_id: str = "";
     has visit_date: str = "";
     has reason: str = "";
@@ -3930,7 +4197,7 @@ walker:pub vet_book {
     }
 }
 
-walker:pub vet_done {
+walker:protect vet_done {
     has visit_id: str;
     has cost: float = 0.0;
     has cleared: bool = False;
@@ -3944,7 +4211,7 @@ walker:pub vet_done {
     }
 }
 
-walker:pub booking_cancel {
+walker:protect booking_cancel {
     has ref_id: str;
     has reports: list[ActionResult] = [];
 
@@ -4606,7 +4873,7 @@ def safe_coach(topic: str, results: str, f: Farm, language: str) -> str {
 # ---------------------------------------------------------------------
 # WEB API for the hatchery tools
 # ---------------------------------------------------------------------
-walker:pub egg_selection_check {
+walker:protect egg_selection_check {
     has bird_type: str = "kienyeji";
     has weight_g: float = 0.0;
     has storage_days: int = 0;
@@ -4631,7 +4898,7 @@ walker:pub egg_selection_check {
     }
 }
 
-walker:pub incubator_check {
+walker:protect incubator_check {
     has day: int = 0;
     has temp: float = 0.0;
     has humidity: float = 0.0;
@@ -4653,7 +4920,7 @@ walker:pub incubator_check {
     }
 }
 
-walker:pub hatch_analysis {
+walker:protect hatch_analysis {
     has set_id: str = "";
     has eggs_set: int = 0;
     has clear: int = 0;           # infertile (no development)
@@ -4729,7 +4996,7 @@ walker:pub hatch_analysis {
     }
 }
 
-walker:pub hatchery_ask {
+walker:protect hatchery_ask {
     has question: str;
     has language: str = "English";
     has reports: list[HatchCheck] = [];
@@ -4739,9 +5006,10 @@ walker:pub hatchery_ask {
         lang = self.language if self.language in ["English", "Kiswahili", "Sheng"] else "English";
         ans = "";
         try {
+            if not ai_quota_ok(f) { raise Exception("daily AI limit"); }
             ans = plain_text(hatchery_answer(self.question, hatch_guide_text(), hatch_facts(f), lang, LANGUAGE_GUIDE));
         } except Exception as err {
-            ans = "The hatchery teacher is not available right now. Please read the guide on this page or try again.";
+            ans = QUOTA_MSG if f.ai_count >= AI_DAILY_LIMIT else "The hatchery teacher is not available right now. Please read the guide on this page or try again.";
         }
         report HatchCheck(ok=True, kind="ask", advice=ans);
     }
