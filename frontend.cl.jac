@@ -11,6 +11,8 @@ import from .components.AdvisorPage { AdvisorPage }
 import from .components.FeedPage { FeedPage }
 import from .components.SalesPage { SalesPage }
 import from .components.ResetFarm { ResetFarm }
+import from .components.AuthPage { AuthPage }
+import from "@jac/runtime" { jacLogout, jacIsLoggedIn }
 
 sv import from farm {
     ChatReply, FarmView, chat, agent_chat, farm_status
@@ -27,7 +29,7 @@ def with_lines(d: dict[str, list[dict]], key: str, value: list[dict]) -> dict[st
     return out;  # jac:ignore[E1002]
 }
 
-def:pub app -> JsxElement {
+def:pub FarmApp(who: str, onLogout: Callable[[], None]) -> JsxElement {
     has page: str = "home";
     has farm: FarmView | None = None;
     has chats: dict[str, list[dict]] = {};
@@ -117,7 +119,9 @@ def:pub app -> JsxElement {
                 {if farm is not None {
                     <span className="km-chip">{"🏡 " + (farm as FarmView).name}</span>
                 }}
-                <button className="km-reset" onClick={lambda(e: MouseEvent) { resetting = True; }} title="Start again: demo farm or your own empty farm">⟳ Reset farm</button>
+                <span className="km-chip" title="Signed in">{"👤 " + who}</span>
+                <button className="km-reset" onClick={lambda(e: MouseEvent) { resetting = True; }} title="Start again: demo farm or your own empty farm (only your own farm)">⟳ Reset farm</button>
+                <button className="km-reset" onClick={lambda(e: MouseEvent) { onLogout(); }} title="Sign out">Log out</button>
                 <label className="km-lang" title="Language KukuMind replies in">
                     🌐
                     <select value={lang} onChange={lambda(e: ChangeEvent) { lang = str(e.target.value); }}>
@@ -162,5 +166,41 @@ def:pub app -> JsxElement {
             <footer className="km-footer">
                 KukuMind never prescribes medicine. For RED alerts, call a vet or the county veterinary officer. · Built with <b>Jac</b> + Claude
             </footer>
+        </div>;
+}
+
+# The page people open: sign in first, then their own private farm
+def:pub app -> JsxElement {
+    has authed: bool = False;
+    has who: str = "";
+
+    can with entry {
+        if jacIsLoggedIn() {
+            authed = True;
+            w: any = window;
+            saved: str = "";
+            try { saved = str(w.localStorage.getItem("kuku_user") or ""); } except Exception as e { saved = ""; }
+            who = saved if saved != "" else "my farm";
+        }
+    }
+    def signed_in(name: str) {
+        w: any = window;
+        try { w.localStorage.setItem("kuku_user", name); } except Exception as e { print("could not remember the name"); }
+        who = name;
+        authed = True;
+    }
+    def sign_out() {
+        jacLogout();
+        authed = False;
+        who = "";
+    }
+
+    return
+        <div>
+            {if authed {
+                <FarmApp who={who} onLogout={sign_out} />
+            } else {
+                <AuthPage onDone={signed_in} />
+            }}
         </div>;
 }
