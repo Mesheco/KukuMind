@@ -30,6 +30,11 @@ typescript = "^5.3.3"
 [dev-dependencies]
 watchdog = ">=3.0.0"
 
+# Declares the AI capability. Without this table a restarted JacHammer app can come back WITHOUT the AI library (litellm)
+# and every chat says "AI helper could not be reached". The app's own models are chosen in farm.jac.
+[byllm.model]
+default_model = "claude-haiku-4-5"
+
 [serve]
 base_route_app = "app"
 
